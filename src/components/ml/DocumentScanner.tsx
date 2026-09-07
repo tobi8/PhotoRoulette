@@ -20,7 +20,7 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2 text-violet-300 font-semibold text-sm">
           <Sparkles size={18} className="animate-spin text-violet-400" />
-          <span>AI & Heuristic Privacy Scanner</span>
+          <span>Document & Receipt Privacy Scanner</span>
         </div>
         <span className="text-xs text-gray-400 font-mono">
           {progress.current} / {progress.total} ({percent}%)
@@ -37,7 +37,7 @@ export const DocumentScanner: React.FC<DocumentScannerProps> = ({
 
       <div className="flex items-center justify-between text-xs text-gray-400">
         <span className="truncate">{progress.status}</span>
-        <span className="shrink-0 text-violet-300/80">Scanning for documents & IDs</span>
+        <span className="shrink-0 text-violet-300/80">Checking for receipts & documents</span>
       </div>
     </div>
   )

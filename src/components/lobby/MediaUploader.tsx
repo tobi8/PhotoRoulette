@@ -59,6 +59,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     items,
     processFiles,
     processUrls,
+    runAiScan,
     loadExistingMedia,
     toggleExclude,
     removePhoto,
@@ -68,6 +69,17 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     excludedCount,
     getApprovedMedia,
   } = useDocumentFilter()
+
+  const handleRunAiScan = async () => {
+    const found = await runAiScan()
+    if (found > 0) {
+      setVaultMessage(`🛡️ Document filter complete: ${found} document${found > 1 ? 's' : ''} flagged for review.`)
+    } else {
+      setVaultMessage('🛡️ Document filter complete: All photos look clean!')
+    }
+    setTimeout(() => setVaultMessage(null), 4000)
+    onMediaReady(getApprovedMedia())
+  }
 
   // Check saved vault status on mount
   useEffect(() => {
@@ -602,7 +614,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               <div className="flex items-center gap-2">
                 <ShieldAlert size={16} className="shrink-0" />
                 <span>
-                  {excludedCount} lame document{excludedCount > 1 ? 's' : ''}/receipt{excludedCount > 1 ? 's' : ''} filtered out.
+                  {excludedCount} document{excludedCount > 1 ? 's' : ''}/receipt{excludedCount > 1 ? 's' : ''} filtered out.
                 </span>
               </div>
               <button
@@ -613,13 +625,18 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               </button>
             </div>
           ) : (
-            <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
-              <ShieldCheck size={16} className="shrink-0" />
-              <span>
-                {vaultCount > 0
-                  ? `Active deck ready from your ${vaultCount} saved Vault photos! Zero documents.`
-                  : 'All photos look great! Zero documents or receipts detected.'}
-              </span>
+            <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/10 text-xs text-gray-300 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={16} className="shrink-0 text-emerald-400" />
+                <span>Photos ready. AI scan is manual only.</span>
+              </div>
+              <button
+                onClick={handleRunAiScan}
+                disabled={isScanning}
+                className="text-[11px] px-2.5 py-1 rounded-lg bg-violet-600/30 hover:bg-violet-600 text-violet-200 hover:text-white transition-colors cursor-pointer font-semibold border border-violet-500/30"
+              >
+                {isScanning ? 'Scanning...' : '🛡️ Scan for Documents'}
+              </button>
             </div>
           )}
 

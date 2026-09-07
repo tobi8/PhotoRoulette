@@ -37,68 +37,25 @@ export function useDocumentFilter() {
   const [progress, setProgress] = useState<ScanProgress>({ current: 0, total: 0, status: '' })
   const [items, setItems] = useState<FilterResultItem[]>([])
 
-  const classifierRef = useRef<any>(null)
-  const isModelLoadingRef = useRef(false)
-
-  // Initialize ML model lazily in background
-  const initClassifier = useCallback(async () => {
-    if (classifierRef.current || isModelLoadingRef.current) return classifierRef.current
-
-    try {
-      isModelLoadingRef.current = true
-      const { pipeline, env } = await import('@xenova/transformers')
-      env.allowLocalModels = false
-      if (env.backends?.onnx?.wasm) {
-        env.backends.onnx.wasm.numThreads = 1
-      }
-      const classifier = await pipeline('image-classification', 'Xenova/mobilenet_v2_1.0_224', {
-        quantized: true,
-      })
-      classifierRef.current = classifier
-      return classifier
-    } catch (err) {
-      console.warn('Transformers.js ML model fallback to Canvas heuristics:', err)
-      return null
-    } finally {
-      isModelLoadingRef.current = false
-    }
-  }, [])
-
   /**
-   * Scan files through dual-tier filter (Canvas Heuristic + optional ML classifier)
+   * Process uploaded files without automatically starting AI analysis
    */
   const processFiles = useCallback(async (files: File[]): Promise<{
     accepted: MediaItem[]
     excluded: ExcludedMediaItem[]
   }> => {
-    setIsScanning(true)
-    setProgress({ current: 0, total: files.length, status: 'Preparing scanner...' })
-
     const results: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
 
     // Process 2 files at a time to prevent mobile browser memory exhaustion
     const BATCH_SIZE = 2
     for (let i = 0; i < files.length; i += BATCH_SIZE) {
       const batch = files.slice(i, i + BATCH_SIZE)
-      setProgress({
-        current: Math.min(i + batch.length, files.length),
-        total: files.length,
-        status: `Processing photos (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
-      })
-
       const batchResults = await Promise.all(
         batch.map(async (file, batchIdx) => {
           const fileIndex = i + batchIdx
           try {
-            // 1. Process media (image or video) with mobile-safe timeout
+            // Compress media to JPEG
             const compressed = await processMediaFile(file)
-
-            // 2. Run instant Canvas Heuristics (on thumbnail)
-            const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl, file.name)
-
-            const isFlagged = heuristic.isDocument && heuristic.confidence >= 0.90
-            const reason = heuristic.reason || 'Verified photo'
-            const confidence = heuristic.confidence
 
             return {
               id: `media-${Date.now()}-${fileIndex}-${Math.random().toString(36).slice(2, 6)}`,
@@ -106,9 +63,9 @@ export function useDocumentFilter() {
               previewUrl: compressed.thumbnailUrl,
               dataUrl: compressed.dataUrl,
               type: compressed.type,
-              reason,
-              confidence,
-              isExcluded: isFlagged, // Only exclude if extremely high confidence
+              reason: 'User photo',
+              confidence: 0,
+              isExcluded: false, // Do not auto-exclude, no automatic AI scan
             }
           } catch (err) {
             console.error(`Error processing file ${file.name}:`, err)
@@ -121,13 +78,10 @@ export function useDocumentFilter() {
         if (res) results.push(res)
       }
 
-      // Small yield to allow UI rendering and browser garbage collection
-      await new Promise((resolve) => setTimeout(resolve, 15))
+      await new Promise((resolve) => setTimeout(resolve, 10))
     }
 
     setItems(results)
-    setIsScanning(false)
-    setProgress({ current: files.length, total: files.length, status: 'Scan complete!' })
 
     const accepted: MediaItem[] = results
       .filter((item) => !item.isExcluded)
@@ -146,20 +100,55 @@ export function useDocumentFilter() {
   }, [])
 
   /**
-   * Process a list of image URLs (such as Google Drive direct links)
+   * Manually run AI document analysis only when explicitly requested by the user
+   */
+  const runAiScan = useCallback(async (): Promise<number> => {
+    if (items.length === 0) return 0
+    setIsScanning(true)
+    setProgress({ current: 0, total: items.length, status: 'Scanning photos for documents...' })
+
+    let foundDocuments = 0
+    const updatedItems: FilterResultItem[] = []
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      setProgress({
+        current: i + 1,
+        total: items.length,
+        status: `Checking photo ${i + 1} of ${items.length}...`,
+      })
+
+      try {
+        const heuristic = await analyzeImageHeuristics(item.previewUrl || item.dataUrl, item.file?.name)
+        const isDoc = heuristic.isDocument && heuristic.confidence >= 0.90
+        if (isDoc) foundDocuments++
+        updatedItems.push({
+          ...item,
+          isExcluded: isDoc,
+          reason: isDoc ? heuristic.reason : 'Verified photo',
+          confidence: heuristic.confidence,
+        })
+      } catch {
+        updatedItems.push(item)
+      }
+
+      await new Promise((r) => setTimeout(r, 10))
+    }
+
+    setItems(updatedItems)
+    setIsScanning(false)
+    setProgress({ current: items.length, total: items.length, status: 'Document scan complete!' })
+    return foundDocuments
+  }, [items])
+
+  /**
+   * Process a list of image URLs (such as Google Drive direct links) without AI scanning
    */
   const processUrls = useCallback(async (urlItems: Array<{ id: string; url: string; name?: string }>): Promise<MediaItem[]> => {
-    setIsScanning(true)
     const accepted: MediaItem[] = []
     const newItems: FilterResultItem[] = []
 
     for (let i = 0; i < urlItems.length; i++) {
-      setProgress({
-        current: i + 1,
-        total: urlItems.length,
-        status: `Importing cloud photo (${i + 1} of ${urlItems.length})...`,
-      })
-
       try {
         const compressed = await compressImageUrl(urlItems[i].url)
         accepted.push({
@@ -175,7 +164,7 @@ export function useDocumentFilter() {
           previewUrl: compressed.thumbnailUrl,
           dataUrl: compressed.dataUrl,
           type: 'image',
-          reason: 'Clean photo',
+          reason: 'Cloud photo',
           confidence: 0,
           isExcluded: false,
         })
@@ -187,8 +176,6 @@ export function useDocumentFilter() {
     }
 
     setItems(newItems)
-    setIsScanning(false)
-    setProgress({ current: urlItems.length, total: urlItems.length, status: 'Cloud import complete!' })
     return accepted
   }, [])
 
@@ -293,6 +280,7 @@ export function useDocumentFilter() {
     items,
     processFiles,
     processUrls,
+    runAiScan,
     loadExistingMedia,
     toggleExclude,
     removePhoto,
