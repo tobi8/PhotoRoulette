@@ -18,6 +18,7 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
   onImportUrls,
 }) => {
   const folderInputRef = useRef<HTMLInputElement>(null)
+  const driveFilesInputRef = useRef<HTMLInputElement>(null)
   const [pastedLinks, setPastedLinks] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -138,7 +139,7 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
           </div>
         )}
 
-        {/* Hidden directory input */}
+        {/* Hidden inputs: Mobile Drive files & Desktop directory */}
         <input
           ref={folderInputRef}
           type="file"
@@ -150,39 +151,78 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
           onChange={handleFolderSelect}
         />
 
-        {/* Option 1: Select Drive Folder */}
-        <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-900/30 to-indigo-950/40 border border-violet-500/30 space-y-3">
+        <input
+          ref={driveFilesInputRef}
+          type="file"
+          multiple
+          accept="image/*,video/*"
+          className="hidden"
+          onChange={handleFolderSelect}
+        />
+
+        {/* Option 1: Mobile Phone Google Drive Folder (Android / iPhone) */}
+        <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/40 via-teal-950/30 to-slate-900 border border-emerald-500/30 space-y-3">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-violet-600/30 border border-violet-400/40 flex items-center justify-center text-violet-300">
-              <Folder size={20} />
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300 text-lg">
+              📱
             </div>
             <div>
               <div className="font-bold text-sm text-white flex items-center gap-2">
-                <span>Select Folder from Computer / Device</span>
-                <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-0.5 rounded-full font-mono">
-                  Recommended
+                <span>Google Drive on Phone / Tablet</span>
+                <span className="text-[10px] bg-emerald-500/25 text-emerald-300 px-2 py-0.5 rounded-full font-mono font-bold">
+                  Easiest on Mobile
                 </span>
               </div>
-              <div className="text-[11px] text-gray-400 mt-0.5">
-                Picks from Google Drive sync, iCloud Drive, or local folder
+              <div className="text-[11px] text-gray-300 mt-0.5">
+                Android Files / iPhone Files & Google Drive app
               </div>
             </div>
+          </div>
+
+          <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 text-[11px] text-gray-300 space-y-1">
+            <div>🤖 <strong>Android:</strong> Tap below → tap <span className="text-white">Files</span> → open menu (☰) → tap <strong className="text-emerald-300">Google Drive</strong> → open folder → tap <strong>⋮</strong> & <strong>Select all</strong></div>
+            <div>🍎 <strong>iPhone:</strong> Tap below → tap <span className="text-white">Choose Files</span> → tap <strong className="text-emerald-300">Google Drive</strong> under Locations → open folder → tap <strong>Select All</strong></div>
           </div>
 
           <Button
             variant="primary"
             size="md"
             fullWidth
+            onClick={() => driveFilesInputRef.current?.click()}
+            disabled={isProcessing}
+            className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-xs py-3 font-black shadow-lg"
+          >
+            <span>📱 Open Drive Folder on Phone</span>
+          </Button>
+        </div>
+
+        {/* Option 2: Desktop Computer Folder (Mac / PC) */}
+        <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-900/30 to-indigo-950/40 border border-violet-500/30 space-y-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-violet-600/30 border border-violet-400/40 flex items-center justify-center text-violet-300 text-lg">
+              💻
+            </div>
+            <div>
+              <div className="font-bold text-sm text-white flex items-center gap-2">
+                <span>Entire Folder on Computer (Mac / PC)</span>
+              </div>
+              <div className="text-[11px] text-gray-400 mt-0.5">
+                Picks entire folder via Google Drive for Desktop or local disk
+              </div>
+            </div>
+          </div>
+
+          <Button
+            variant="secondary"
+            size="md"
+            fullWidth
             onClick={() => folderInputRef.current?.click()}
             disabled={isProcessing}
-            className="bg-gradient-to-r from-violet-600 to-indigo-600 text-xs py-2.5 font-bold"
+            className="text-xs py-2.5 font-bold border-violet-500/40 text-violet-200"
           >
             <Folder size={15} />
-            <span>Browse & Pick Folder</span>
+            <span>💻 Pick Entire Folder on Computer</span>
           </Button>
-          <div className="text-[10px] text-gray-400 italic">
-            * All photos in the folder will be shuffled and added to your roulette vault!
-          </div>
         </div>
 
         {/* Option 2: Paste Google Drive Links */}
