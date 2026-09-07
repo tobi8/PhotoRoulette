@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { ExcludedMediaItem, MediaItem } from '../types/game'
 import { processMediaFile } from '../utils/imageCompression'
 import { analyzeImageHeuristics } from '../utils/documentHeuristics'
+import { fisherYatesShuffle } from '../services/photoVaultService'
 
 const DOCUMENT_KEYWORDS = [
   'document',
@@ -76,62 +77,73 @@ export function useDocumentFilter() {
 
     const results: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
+    const BATCH_SIZE = 4
+    for (let i = 0; i < files.length; i += BATCH_SIZE) {
+      const batch = files.slice(i, i + BATCH_SIZE)
       setProgress({
-        current: i + 1,
+        current: Math.min(i + batch.length, files.length),
         total: files.length,
-        status: `Analyzing photo ${i + 1} of ${files.length}...`,
+        status: `Optimizing & scanning photos (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
       })
 
-      try {
-        // 1. Process media (image or video) with mobile-safe timeout
-        const compressed = await processMediaFile(file)
-
-        // 2. Run instant Canvas Heuristics (on thumbnail)
-        const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl)
-
-        let isFlagged = heuristic.isDocument
-        let reason = heuristic.reason
-        let confidence = heuristic.confidence
-
-        // 3. If canvas heuristic is clean and item is an image, test ML classifier if available
-        if (!isFlagged && file.type.startsWith('image/')) {
+      const batchResults = await Promise.all(
+        batch.map(async (file, batchIdx) => {
+          const fileIndex = i + batchIdx
           try {
-            const classifier = await mlPromise
-            if (classifier) {
-              const mlOutput = await classifier(compressed.thumbnailUrl, { topk: 3 })
-              if (Array.isArray(mlOutput)) {
-                for (const pred of mlOutput) {
-                  const label = (pred.label || '').toLowerCase()
-                  const score = pred.score || 0
-                  const isDocLabel = DOCUMENT_KEYWORDS.some((kw) => label.includes(kw))
-                  if (isDocLabel && score > 0.25) {
-                    isFlagged = true
-                    reason = `AI detected: ${pred.label} (${Math.round(score * 100)}% match)`
-                    confidence = Math.max(confidence, score)
-                    break
+            // 1. Process media (image or video) with mobile-safe timeout
+            const compressed = await processMediaFile(file)
+
+            // 2. Run instant Canvas Heuristics (on thumbnail)
+            const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl)
+
+            let isFlagged = heuristic.isDocument
+            let reason = heuristic.reason
+            let confidence = heuristic.confidence
+
+            // 3. If canvas heuristic is clean and item is an image, test ML classifier if available
+            if (!isFlagged && file.type.startsWith('image/')) {
+              try {
+                const classifier = await mlPromise
+                if (classifier) {
+                  const mlOutput = await classifier(compressed.thumbnailUrl, { topk: 3 })
+                  if (Array.isArray(mlOutput)) {
+                    for (const pred of mlOutput) {
+                      const label = (pred.label || '').toLowerCase()
+                      const score = pred.score || 0
+                      const isDocLabel = DOCUMENT_KEYWORDS.some((kw) => label.includes(kw))
+                      if (isDocLabel && score > 0.25) {
+                        isFlagged = true
+                        reason = `AI detected: ${pred.label} (${Math.round(score * 100)}% match)`
+                        confidence = Math.max(confidence, score)
+                        break
+                      }
+                    }
                   }
                 }
+              } catch {
+                // Graceful fallback to heuristic result
               }
             }
-          } catch (mlErr) {
-            // Graceful fallback to heuristic result
-          }
-        }
 
-        results.push({
-          id: `media-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
-          file,
-          previewUrl: compressed.thumbnailUrl,
-          dataUrl: compressed.dataUrl,
-          type: compressed.type,
-          reason: reason || 'Verified safe photo',
-          confidence,
-          isExcluded: isFlagged,
+            return {
+              id: `media-${Date.now()}-${fileIndex}-${Math.random().toString(36).slice(2, 6)}`,
+              file,
+              previewUrl: compressed.thumbnailUrl,
+              dataUrl: compressed.dataUrl,
+              type: compressed.type,
+              reason: reason || 'Verified safe photo',
+              confidence,
+              isExcluded: isFlagged,
+            }
+          } catch (err) {
+            console.error(`Error processing file ${file.name}:`, err)
+            return null
+          }
         })
-      } catch (err) {
-        console.error(`Error processing file ${file.name}:`, err)
+      )
+
+      for (const res of batchResults) {
+        if (res) results.push(res)
       }
     }
 
@@ -220,10 +232,30 @@ export function useDocumentFilter() {
   }, [])
 
   /**
-   * Reroll: Shuffles and randomly replaces items in current deck
+   * Loads pre-approved photos/videos (e.g. from local Persistent Vault) directly into state
+   */
+  const loadExistingMedia = useCallback(
+    (mediaItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string }>) => {
+      setItems(
+        mediaItems.map((item) => ({
+          id: item.id,
+          previewUrl: item.previewUrl || item.dataUrl,
+          dataUrl: item.dataUrl,
+          type: item.type,
+          reason: 'Loaded from local vault',
+          confidence: 0,
+          isExcluded: false,
+        }))
+      )
+    },
+    []
+  )
+
+  /**
+   * Reroll: Shuffles items in current deck using uniform Fisher-Yates
    */
   const rerollDeck = useCallback(() => {
-    setItems((prev) => [...prev].sort(() => Math.random() - 0.5))
+    setItems((prev) => fisherYatesShuffle(prev))
   }, [])
 
   const acceptedCount = items.filter((i) => !i.isExcluded).length
@@ -234,6 +266,7 @@ export function useDocumentFilter() {
     progress,
     items,
     processFiles,
+    loadExistingMedia,
     toggleExclude,
     removePhoto,
     clearPhotos,
