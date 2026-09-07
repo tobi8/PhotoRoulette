@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Photo Roulette</title>
+    <script>
+      // Single Page Apps for GitHub Pages
+      // Redirects 404 paths to index.html with query/hash
+      var segmentCount = 0;
+      var l = window.location;
+      var path = l.pathname.slice(1).split('/').slice(segmentCount).join('/');
+      l.replace(
+        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        l.pathname.split('/').slice(0, 1 + segmentCount).join('/') + '/#' +
+        path + (l.search ? '&' + l.search.slice(1) : '')
+      );
+    </script>
+  </head>
+  <body>
+    Redirecting to Photo Roulette...
+  </body>
+</html>
