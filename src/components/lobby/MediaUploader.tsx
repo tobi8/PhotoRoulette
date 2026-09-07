@@ -29,9 +29,11 @@ import {
   getVaultCount,
   savePhotosToVault,
   sampleRandomFromVault,
+  getAllVaultPhotos,
   clearVault,
   fisherYatesShuffle,
 } from '../../services/photoVaultService'
+import { createFallbackPhotoCard } from '../../utils/imageCompression'
 
 interface MediaUploaderProps {
   onMediaReady: (mediaItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }>) => void
@@ -48,7 +50,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [isCloudModalOpen, setIsCloudModalOpen] = useState(false)
   const [vaultCount, setVaultCount] = useState<number>(0)
-  const [isSecretMode, setIsSecretMode] = useState<boolean>(true)
+  const [isSecretMode, setIsSecretMode] = useState<boolean>(false)
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
 
   const {
@@ -269,9 +271,26 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
-  const handleRemoveSingle = (id: string, e: React.MouseEvent) => {
+  const handleRemoveSingle = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     removePhoto(id)
+
+    // If there are more photos in the vault, immediately draw a replacement so player still has a full deck
+    if (vaultCount > items.length) {
+      const allPhotos = await getAllVaultPhotos()
+      const currentIds = new Set(items.map((i) => i.id))
+      const available = allPhotos.filter((p) => !currentIds.has(p.id) && p.id !== id)
+      if (available.length > 0) {
+        const replacement = available[Math.floor(Math.random() * available.length)]
+        const remaining = items.filter((i) => i.id !== id)
+        loadExistingMedia([...remaining, replacement])
+        setTimeout(() => {
+          onMediaReady(getApprovedMedia())
+        }, 50)
+        return
+      }
+    }
+
     setTimeout(() => {
       onMediaReady(getApprovedMedia())
     }, 50)
@@ -468,33 +487,34 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       {/* Once loaded: Shows SECRET MYSTERY DECK preview, auto-ready status, and review option */}
       {items.length > 0 && !isScanning && (
         <div className="space-y-3">
-          {/* Deck Preview Carousel with Secret Blind Mode */}
+          {/* Deck Preview Carousel with Clear Visual Previews Beforehand */}
           <div>
             <div className="flex items-center justify-between text-xs text-gray-300 font-bold mb-1.5 px-1">
               <div className="flex items-center gap-1.5">
-                {isSecretMode ? (
-                  <>
-                    <Lock size={13} className="text-violet-400" />
-                    <span className="text-violet-300">SECRET MYSTERY DECK ({approvedItems.length})</span>
-                  </>
-                ) : (
-                  <>
-                    <Eye size={13} className="text-amber-400" />
-                    <span>UNMASKED DECK ({approvedItems.length})</span>
-                  </>
-                )}
+                <span className="text-violet-300 font-black">
+                  📸 Selected Photos ({approvedItems.length})
+                </span>
+                <span className="text-[10px] text-gray-400 font-normal">
+                  (tap to enlarge)
+                </span>
               </div>
               <button
                 onClick={() => setIsSecretMode(!isSecretMode)}
-                className="text-[11px] text-violet-400 hover:text-violet-200 flex items-center gap-1 cursor-pointer font-medium"
+                className={`text-[11px] px-2.5 py-1 rounded-full border transition-all cursor-pointer font-medium flex items-center gap-1.5 ${
+                  isSecretMode
+                    ? 'bg-violet-900/60 border-violet-400/50 text-violet-200 hover:bg-violet-800/60'
+                    : 'bg-white/5 border-white/10 text-gray-300 hover:text-white hover:bg-white/10'
+                }`}
               >
                 {isSecretMode ? (
                   <>
-                    <Eye size={12} /> Peek to Veto
+                    <Eye size={12} className="text-amber-400" />
+                    <span>Show Photos</span>
                   </>
                 ) : (
                   <>
-                    <EyeOff size={12} /> Hide for Surprise
+                    <EyeOff size={12} className="text-violet-400" />
+                    <span>Blindfold Mode</span>
                   </>
                 )}
               </button>
@@ -505,15 +525,20 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               {approvedItems.map((item, idx) => (
                 <div
                   key={item.id}
-                  className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-white/20 group bg-black/60 shadow-md"
+                  onClick={() => setIsPreviewModalOpen(true)}
+                  className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-white/20 group bg-slate-900 shadow-md cursor-pointer hover:border-violet-400 transition-all active:scale-95"
+                  title="Click to inspect beforehand"
                 >
                   <img
                     src={item.previewUrl || item.dataUrl}
-                    alt="Deck photo"
+                    alt=""
+                    onError={(e) => {
+                      e.currentTarget.src = createFallbackPhotoCard(`Photo #${idx + 1}`)
+                    }}
                     className={`w-full h-full object-cover transition-all duration-300 ${
                       isSecretMode
                         ? 'blur-md brightness-50 contrast-125 scale-110'
-                        : 'blur-none brightness-100'
+                        : 'blur-none brightness-100 group-hover:scale-105'
                     }`}
                   />
 
@@ -531,25 +556,21 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                     </div>
                   )}
 
-                  {/* Single Photo Remove (Available in peek mode) */}
-                  {!isSecretMode && (
-                    <button
-                      onClick={(e) => handleRemoveSingle(item.id, e)}
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 hover:bg-red-600 text-white flex items-center justify-center text-xs transition-colors cursor-pointer"
-                      title="Remove this photo from game"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
+                  {/* Single Photo Veto / Remove button */}
+                  <button
+                    onClick={(e) => handleRemoveSingle(item.id, e)}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/80 hover:bg-red-600 text-white flex items-center justify-center text-xs transition-colors cursor-pointer shadow-md"
+                    title="Veto photo (swap with another)"
+                  >
+                    <X size={12} />
+                  </button>
                 </div>
               ))}
             </div>
 
-            {isSecretMode && (
-              <p className="text-[11px] text-violet-300/70 italic px-1 pt-0.5">
-                🤫 Photos are secretly scrambled to keep rounds a total surprise!
-              </p>
-            )}
+            <p className="text-[11px] text-gray-400 px-1 pt-0.5">
+              💡 {isSecretMode ? 'Blindfold mode: photos are blurred for surprise.' : 'Review your photos beforehand! Tap any photo to enlarge or ✕ to swap.'}
+            </p>
           </div>
 
           {/* Reroll & Review Buttons */}
@@ -557,39 +578,47 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             <Button
               variant="secondary"
               size="md"
-              className="flex-1 text-xs border-amber-500/30 text-amber-200"
+              className="flex-1 text-xs border-violet-500/30 text-violet-200 font-bold bg-violet-950/30 hover:bg-violet-900/40"
+              onClick={() => setIsPreviewModalOpen(true)}
+            >
+              <Eye size={15} className="text-violet-400" />
+              <span>🔍 Inspect Photos ({approvedItems.length})</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="md"
+              className="flex-1 text-xs border-amber-500/30 text-amber-200 hover:bg-amber-950/20"
               onClick={handleReroll}
             >
               <RotateCw size={14} className="text-amber-400" />
               <span>🎲 Reroll 15 Photos</span>
             </Button>
-
-            <Button
-              size="md"
-              variant="outline"
-              onClick={() => setIsPreviewModalOpen(true)}
-              className="text-xs"
-            >
-              <Eye size={14} />
-              <span>Review ({excludedCount} filtered)</span>
-            </Button>
           </div>
 
           {/* Privacy summary */}
           {excludedCount > 0 ? (
-            <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300 flex items-center gap-2">
-              <ShieldAlert size={16} className="shrink-0" />
-              <span>
-                {excludedCount} receipts/documents were automatically excluded for privacy.
-              </span>
+            <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={16} className="shrink-0" />
+                <span>
+                  {excludedCount} lame document{excludedCount > 1 ? 's' : ''}/receipt{excludedCount > 1 ? 's' : ''} filtered out.
+                </span>
+              </div>
+              <button
+                onClick={() => setIsPreviewModalOpen(true)}
+                className="text-[11px] underline font-bold hover:text-white shrink-0 cursor-pointer"
+              >
+                Review & Restore
+              </button>
             </div>
           ) : (
             <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
               <ShieldCheck size={16} className="shrink-0" />
               <span>
                 {vaultCount > 0
-                  ? `Active deck ready from your ${vaultCount} saved Vault photos!`
-                  : 'Privacy filter verified: all photos look safe to share!'}
+                  ? `Active deck ready from your ${vaultCount} saved Vault photos! Zero documents.`
+                  : 'All photos look great! Zero documents or receipts detected.'}
               </span>
             </div>
           )}

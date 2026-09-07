@@ -75,8 +75,8 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
         const driveMatch = line.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || line.match(/id=([a-zA-Z0-9_-]+)/)
         if (driveMatch && driveMatch[1]) {
           const fileId = driveMatch[1]
-          // Google high-resolution direct image CDN URL
-          const directUrl = `https://lh3.googleusercontent.com/d/${fileId}`
+          // Standard Google Drive high-resolution thumbnail endpoint
+          const directUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`
           importedUrls.push({
             id: `gdrive-${fileId}`,
             url: directUrl,

@@ -18,8 +18,21 @@ export interface HeuristicScanResult {
 /**
  * Analyzes an HTML5 Image/Canvas for document and text characteristics
  */
-export async function analyzeImageHeuristics(imageSource: HTMLImageElement | string): Promise<HeuristicScanResult> {
+export async function analyzeImageHeuristics(
+  imageSource: HTMLImageElement | string,
+  fileName?: string
+): Promise<HeuristicScanResult> {
   return new Promise((resolve) => {
+    // Fast check: If filename indicates document, receipt, or invoice
+    if (fileName && /\b(receipt|invoice|beleg|rechnung|kontoauszug|tax|steuer|boarding_pass|formular|bill|statement|check|ticket)\b/i.test(fileName)) {
+      return resolve({
+        isDocument: true,
+        confidence: 0.98,
+        reason: 'Lame document/receipt identified from filename',
+        details: { monochromeRatio: 1, edgeDensity: 1, textLineScore: 1, saturationMean: 0 },
+      })
+    }
+
     const runAnalysis = (img: HTMLImageElement) => {
       // Downscale to 256x256 for rapid (< 25ms) pixel analysis
       const width = 256
@@ -115,30 +128,29 @@ export async function analyzeImageHeuristics(imageSource: HTMLImageElement | str
       const textLineScore = horizontalTransitions / height
 
       // Heuristic Scoring Rules:
-      // 1. High monochrome + bright background + dark text = standard printed document / receipt / invoice / book page
-      // 2. High text line score + low saturation = screenshot of chat / code / web article
-      // 3. Very high edge density + monochrome = spreadsheet or tabular document
+      // STRICTLY AND ONLY flag genuine lame documents (receipts, bills, tax forms, invoices, paper scans).
+      // NEVER flag real-life photos (people, scenery, food, pets, black-and-white portraits, snowy landscapes).
 
       let isDocument = false
       let confidence = 0
       let reason = ''
 
-      if (monochromeRatio > 0.72 && brightBgRatio > 0.40 && darkTextRatio > 0.05) {
+      const isLongReceipt = (height / width > 1.8) && monochromeRatio > 0.70 && brightBgRatio > 0.45 && textLineScore > 0.30
+
+      if (isLongReceipt) {
         isDocument = true
-        confidence = Math.min(0.95, 0.7 + (monochromeRatio - 0.7) * 0.8)
-        reason = 'Printed document or receipt detected (high-contrast monochrome text on light background)'
-      } else if (monochromeRatio > 0.65 && textLineScore > 0.35) {
+        confidence = 0.96
+        reason = 'Cash register receipt or ticket detected'
+      } else if (monochromeRatio > 0.80 && brightBgRatio > 0.50 && darkTextRatio >= 0.02 && darkTextRatio <= 0.25 && textLineScore > 0.40) {
+        // High monochrome + wide paper-white background + sparse dark text in horizontal lines = printed paper receipt / invoice / bill
         isDocument = true
-        confidence = Math.min(0.92, 0.65 + textLineScore * 0.5)
-        reason = 'Text screenshot or page detected (dense horizontal text lines)'
-      } else if (edgeDensity > 0.18 && monochromeRatio > 0.60) {
+        confidence = 0.95
+        reason = 'Printed document or receipt detected (paper background with text lines)'
+      } else if (edgeDensity > 0.22 && monochromeRatio > 0.82 && textLineScore > 0.45 && brightBgRatio > 0.45) {
+        // Structured black & white document like a table, invoice, or tax form
         isDocument = true
-        confidence = 0.85
-        reason = 'Spreadsheet, form, or structured document detected'
-      } else if (saturationMean < 0.12 && (brightBgRatio > 0.55 || darkTextRatio > 0.3)) {
-        isDocument = true
-        confidence = 0.80
-        reason = 'Black-and-white scan or ID document detected'
+        confidence = 0.92
+        reason = 'Spreadsheet or tax/billing form detected'
       }
 
       resolve({

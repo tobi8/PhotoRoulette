@@ -94,9 +94,9 @@ export function useDocumentFilter() {
             const compressed = await processMediaFile(file)
 
             // 2. Run instant Canvas Heuristics (on thumbnail)
-            const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl)
+            const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl, file.name)
 
-            const isFlagged = heuristic.isDocument && heuristic.confidence > 0.92
+            const isFlagged = heuristic.isDocument && heuristic.confidence >= 0.90
             const reason = heuristic.reason || 'Verified photo'
             const confidence = heuristic.confidence
 

@@ -13,76 +13,140 @@ export interface CompressionResult {
 
 /**
  * Resizes and compresses an image file to max 960x960, JPEG ~70%, kept small for P2P WebRTC transfer and IndexedDB storage.
+ * Seamlessly handles iPhone HEIC/HEIF files and uses fast Object URLs.
  */
 export async function compressImage(file: File, maxDim = 960, quality = 0.70): Promise<CompressionResult> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = reject
-    reader.onload = (e) => {
-      const img = new Image()
-      img.onerror = () => {
-        // Fallback for tricky image formats
-        resolve({
-          dataUrl: e.target?.result as string,
-          thumbnailUrl: e.target?.result as string,
+  // 1. Detect and convert iPhone HEIC/HEIF files to JPEG
+  let blobToProcess: Blob = file
+  const isHeic = /\.(heic|heif)$/i.test(file.name) || file.type === 'image/heic' || file.type === 'image/heif'
+
+  if (isHeic && typeof window !== 'undefined') {
+    try {
+      const heic2anyModule = await import('heic2any')
+      const heic2any = (heic2anyModule as any).default || heic2anyModule
+      const converted = await heic2any({
+        blob: file,
+        toType: 'image/jpeg',
+        quality: 0.85,
+      })
+      blobToProcess = Array.isArray(converted) ? converted[0] : converted
+    } catch (err) {
+      console.warn('heic2any conversion fallback for', file.name, err)
+    }
+  }
+
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(blobToProcess)
+    const img = new Image()
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      // If decoding fails, generate an attractive fallback photo memory card so it NEVER renders broken
+      const fallbackUrl = createFallbackPhotoCard(file.name)
+      resolve({
+        dataUrl: fallbackUrl,
+        thumbnailUrl: fallbackUrl,
+        width: 800,
+        height: 600,
+        sizeBytes: fallbackUrl.length,
+        type: 'image',
+      })
+    }
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      let { width, height } = img
+
+      // Maintain aspect ratio
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width)
+          width = maxDim
+        } else {
+          width = Math.round((width * maxDim) / height)
+          height = maxDim
+        }
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        const fallback = createFallbackPhotoCard(file.name)
+        return resolve({
+          dataUrl: fallback,
+          thumbnailUrl: fallback,
           width: 800,
           height: 600,
-          sizeBytes: file.size,
+          sizeBytes: fallback.length,
           type: 'image',
         })
       }
-      img.onload = () => {
-        let { width, height } = img
 
-        // Maintain aspect ratio
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width)
-            width = maxDim
-          } else {
-            width = Math.round((width * maxDim) / height)
-            height = maxDim
-          }
-        }
+      ctx.drawImage(img, 0, 0, width, height)
+      const dataUrl = canvas.toDataURL('image/jpeg', quality)
 
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        if (!ctx) {
-          return reject(new Error('Canvas 2D context unavailable'))
-        }
-
-        ctx.drawImage(img, 0, 0, width, height)
-        const dataUrl = canvas.toDataURL('image/jpeg', quality)
-
-        // Generate small thumbnail for review modal
-        const thumbCanvas = document.createElement('canvas')
-        const thumbScale = Math.min(240 / width, 240 / height)
-        thumbCanvas.width = Math.round(width * thumbScale)
-        thumbCanvas.height = Math.round(height * thumbScale)
-        const thumbCtx = thumbCanvas.getContext('2d')
-        let thumbUrl = dataUrl
-        if (thumbCtx) {
-          thumbCtx.drawImage(img, 0, 0, thumbCanvas.width, thumbCanvas.height)
-          thumbUrl = thumbCanvas.toDataURL('image/jpeg', 0.6)
-        }
-
-        const sizeBytes = Math.round((dataUrl.length * 3) / 4)
-
-        resolve({
-          dataUrl,
-          thumbnailUrl: thumbUrl,
-          width,
-          height,
-          sizeBytes,
-          type: 'image',
-        })
+      // Generate small thumbnail for review modal
+      const thumbCanvas = document.createElement('canvas')
+      const thumbScale = Math.min(240 / width, 240 / height)
+      thumbCanvas.width = Math.max(1, Math.round(width * thumbScale))
+      thumbCanvas.height = Math.max(1, Math.round(height * thumbScale))
+      const thumbCtx = thumbCanvas.getContext('2d')
+      let thumbUrl = dataUrl
+      if (thumbCtx) {
+        thumbCtx.drawImage(img, 0, 0, thumbCanvas.width, thumbCanvas.height)
+        thumbUrl = thumbCanvas.toDataURL('image/jpeg', 0.6)
       }
-      img.src = e.target?.result as string
+
+      const sizeBytes = Math.round((dataUrl.length * 3) / 4)
+
+      resolve({
+        dataUrl,
+        thumbnailUrl: thumbUrl,
+        width,
+        height,
+        sizeBytes,
+        type: 'image',
+      })
     }
-    reader.readAsDataURL(file)
+
+    img.src = objectUrl
   })
+}
+
+/**
+ * Creates a clean, attractive photo card canvas for files that cannot be decoded directly
+ */
+export function createFallbackPhotoCard(label = 'Photo Memory'): string {
+  if (typeof document === 'undefined') return ''
+  const canvas = document.createElement('canvas')
+  canvas.width = 600
+  canvas.height = 600
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+
+  const grad = ctx.createLinearGradient(0, 0, 600, 600)
+  grad.addColorStop(0, '#3b0764')
+  grad.addColorStop(0.5, '#4338ca')
+  grad.addColorStop(1, '#065f46')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, 600, 600)
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
+  ctx.font = 'bold 54px system-ui, -apple-system, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText('📸', 300, 270)
+
+  ctx.font = 'bold 26px system-ui, -apple-system, sans-serif'
+  const displayLabel = label.length > 22 ? label.slice(0, 20) + '...' : label
+  ctx.fillText(displayLabel, 300, 340)
+
+  ctx.font = '16px system-ui, -apple-system, sans-serif'
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
+  ctx.fillText('Roulette Photo', 300, 380)
+
+  return canvas.toDataURL('image/jpeg', 0.8)
 }
 
 /**
@@ -265,57 +329,66 @@ export async function processMediaFile(file: File): Promise<CompressionResult> {
  * Loads an image from a URL (such as Google Drive direct CDN links) and compresses it
  */
 export async function compressImageUrl(url: string, maxDim = 960, quality = 0.70): Promise<CompressionResult> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      let { width, height } = img
-      if (width > maxDim || height > maxDim) {
-        if (width > height) {
-          height = Math.round((height * maxDim) / width)
-          width = maxDim
-        } else {
-          width = Math.round((width * maxDim) / height)
-          height = maxDim
+  const tryLoad = (src: string, useCors = true): Promise<CompressionResult | null> => {
+    return new Promise((resolve) => {
+      const img = new Image()
+      if (useCors) img.crossOrigin = 'anonymous'
+
+      img.onload = () => {
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width)
+            width = maxDim
+          } else {
+            width = Math.round((width * maxDim) / height)
+            height = maxDim
+          }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return resolve(null)
+        try {
+          ctx.drawImage(img, 0, 0, width, height)
+          const dataUrl = canvas.toDataURL('image/jpeg', quality)
+          resolve({
+            dataUrl,
+            thumbnailUrl: dataUrl,
+            width,
+            height,
+            sizeBytes: Math.round((dataUrl.length * 3) / 4),
+            type: 'image',
+          })
+        } catch {
+          resolve(null)
         }
       }
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        return resolve({
-          dataUrl: url,
-          thumbnailUrl: url,
-          width: 800,
-          height: 600,
-          sizeBytes: 50000,
-          type: 'image',
-        })
-      }
-      ctx.drawImage(img, 0, 0, width, height)
-      const dataUrl = canvas.toDataURL('image/jpeg', quality)
-      resolve({
-        dataUrl,
-        thumbnailUrl: dataUrl,
-        width,
-        height,
-        sizeBytes: Math.round((dataUrl.length * 3) / 4),
-        type: 'image',
-      })
-    }
-    img.onerror = () => {
-      resolve({
-        dataUrl: url,
-        thumbnailUrl: url,
-        width: 800,
-        height: 600,
-        sizeBytes: 50000,
-        type: 'image',
-      })
-    }
-    img.src = url
-  })
+      img.onerror = () => resolve(null)
+      img.src = src
+    })
+  }
+
+  // 1. Try direct load with CORS
+  let res = await tryLoad(url, true)
+  if (res) return res
+
+  // 2. Try loading via reliable CORS image proxy
+  const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&w=${maxDim}&q=${Math.round(quality * 100)}&output=jpg`
+  res = await tryLoad(proxyUrl, true)
+  if (res) return res
+
+  // 3. Fallback: return a clean rendered card canvas so broken image never displays
+  const fallback = createFallbackPhotoCard('Cloud Photo')
+  return {
+    dataUrl: fallback,
+    thumbnailUrl: fallback,
+    width: 600,
+    height: 600,
+    sizeBytes: fallback.length,
+    type: 'image',
+  }
 }
 
 /**

@@ -4,6 +4,7 @@ import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { ExcludedMediaItem } from '../../types/game'
+import { createFallbackPhotoCard } from '../../utils/imageCompression'
 
 interface ImagePreviewModalProps {
   isOpen: boolean
@@ -124,7 +125,10 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
                 <div className="aspect-[4/3] w-full overflow-hidden bg-black/60 relative">
                   <img
                     src={item.previewUrl || item.dataUrl}
-                    alt="Upload preview"
+                    alt=""
+                    onError={(e) => {
+                      e.currentTarget.src = createFallbackPhotoCard('Photo')
+                    }}
                     className={`w-full h-full object-cover transition-transform group-hover:scale-105 ${
                       item.isExcluded ? 'filter blur-[2px] brightness-75' : ''
                     }`}
