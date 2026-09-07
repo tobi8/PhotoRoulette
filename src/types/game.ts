@@ -18,6 +18,7 @@ export interface MediaItem {
   ownerName: string
   type: 'image' | 'video'
   dataUrl: string
+  previewUrl?: string
   aspectRatio?: number
   duration?: number
 }

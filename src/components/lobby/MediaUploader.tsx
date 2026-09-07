@@ -16,11 +16,13 @@ import {
   Trash2,
   Sparkles,
   Plus,
+  Folder,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { DocumentScanner } from '../ml/DocumentScanner'
 import { ImagePreviewModal } from '../ml/ImagePreviewModal'
+import { CloudImportModal } from './CloudImportModal'
 import { useDocumentFilter } from '../../hooks/useDocumentFilter'
 import { isNativeApp, queryNativeCameraRoll } from '../../services/nativeMediaService'
 import {
@@ -44,6 +46,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
+  const [isCloudModalOpen, setIsCloudModalOpen] = useState(false)
   const [vaultCount, setVaultCount] = useState<number>(0)
   const [isSecretMode, setIsSecretMode] = useState<boolean>(true)
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
@@ -53,6 +56,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     progress,
     items,
     processFiles,
+    processUrls,
     loadExistingMedia,
     toggleExclude,
     removePhoto,
@@ -122,6 +126,81 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         setVaultMessage(`🎉 ${accepted.length} photos saved to your Vault! Total pool: ${updatedCount} photos.`)
         setTimeout(() => setVaultMessage(null), 4500)
       }
+    }
+  }
+
+  // Handle folder import (local folder, Google Drive synced folder, iCloud)
+  const handleImportFolderFiles = async (files: File[]) => {
+    let filesArray = fisherYatesShuffle(files)
+    if (filesArray.length > 100) {
+      filesArray = filesArray.slice(0, 100)
+    }
+
+    const { accepted } = await processFiles(filesArray)
+    if (accepted.length > 0) {
+      await savePhotosToVault(
+        accepted.map((m) => ({
+          id: m.id,
+          type: m.type,
+          dataUrl: m.dataUrl,
+        }))
+      )
+      const updatedCount = await getVaultCount()
+      setVaultCount(updatedCount)
+
+      const activeSample = await sampleRandomFromVault(15)
+      loadExistingMedia(activeSample)
+
+      const mapped = activeSample.map((s) => ({
+        id: s.id,
+        ownerId: '',
+        ownerName: '',
+        type: s.type,
+        dataUrl: s.dataUrl,
+      }))
+      onMediaReady(mapped)
+
+      if (!isReady) {
+        onToggleReady()
+      }
+
+      setVaultMessage(`🎉 ${accepted.length} photos imported from folder & saved to Vault! Total pool: ${updatedCount}`)
+      setTimeout(() => setVaultMessage(null), 4500)
+    }
+  }
+
+  // Handle Google Drive links / cloud image URLs import
+  const handleImportUrls = async (urlItems: Array<{ id: string; url: string; name?: string }>) => {
+    const accepted = await processUrls(urlItems)
+    if (accepted.length > 0) {
+      await savePhotosToVault(
+        accepted.map((m) => ({
+          id: m.id,
+          type: m.type,
+          dataUrl: m.dataUrl,
+        }))
+      )
+      const updatedCount = await getVaultCount()
+      setVaultCount(updatedCount)
+
+      const activeSample = await sampleRandomFromVault(15)
+      loadExistingMedia(activeSample)
+
+      const mapped = activeSample.map((s) => ({
+        id: s.id,
+        ownerId: '',
+        ownerName: '',
+        type: s.type,
+        dataUrl: s.dataUrl,
+      }))
+      onMediaReady(mapped)
+
+      if (!isReady) {
+        onToggleReady()
+      }
+
+      setVaultMessage(`🎉 ${accepted.length} cloud photos imported & saved to Vault! Total pool: ${updatedCount}`)
+      setTimeout(() => setVaultMessage(null), 4500)
     }
   }
 
@@ -309,45 +388,56 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 <span>⚡ Roll 15 Mystery Photos</span>
               </Button>
 
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  fullWidth
                   onClick={() => fileInputRef.current?.click()}
                   className="border-white/10 text-xs py-2 text-gray-300 hover:text-white"
                 >
-                  <Plus size={14} /> Add More Photos
+                  <Plus size={14} /> Add Photos
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  fullWidth
-                  onClick={handleClearVault}
-                  className="border-white/10 text-xs py-2 text-red-300 hover:text-red-200 hover:border-red-500/30"
+                  onClick={() => setIsCloudModalOpen(true)}
+                  className="border-violet-500/30 bg-violet-950/20 text-xs py-2 text-violet-300 hover:text-violet-200 hover:border-violet-500/50"
                 >
-                  <Trash2 size={14} /> Clear Vault
+                  <Folder size={14} /> Drive / Folder
                 </Button>
               </div>
             </div>
           ) : (
             /* First Time Setup: Upload 50-100 Photos into Vault */
-            <button
-              onClick={handleCameraRollClick}
-              className="w-full p-6 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-violet-600/40 flex items-center justify-center text-violet-200 border border-violet-400/40 shadow-inner">
-                <Camera size={28} className="animate-pulse" />
-              </div>
-              <div className="text-center">
-                <div className="font-black text-white text-base">
-                  📱 Select 50–100 Photos (Upload Once)
+            <div className="space-y-2">
+              <button
+                onClick={handleCameraRollClick}
+                className="w-full p-6 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-violet-600/40 flex items-center justify-center text-violet-200 border border-violet-400/40 shadow-inner">
+                  <Camera size={28} className="animate-pulse" />
                 </div>
-                <div className="text-xs text-violet-300/80 mt-1 max-w-xs">
-                  Swipe-select photos once. They are compressed & stored locally in your browser's Photo Vault for instant 1-tap play forever!
+                <div className="text-center">
+                  <div className="font-black text-white text-base">
+                    📱 Select 50–100 Photos (Upload Once)
+                  </div>
+                  <div className="text-xs text-violet-300/80 mt-1 max-w-xs">
+                    Swipe-select photos once. Stored locally in your browser's Photo Vault for instant 1-tap play forever!
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+
+              <Button
+                variant="outline"
+                size="md"
+                fullWidth
+                onClick={() => setIsCloudModalOpen(true)}
+                className="border-violet-500/30 bg-violet-950/30 text-xs text-violet-200 py-3 hover:bg-violet-900/40 font-bold"
+              >
+                <Folder size={16} className="text-violet-400" />
+                <span>📂 Import from Google Drive or Folder</span>
+              </Button>
+            </div>
           )}
 
           {/* Quick iOS Swipe Tip */}
@@ -509,15 +599,25 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             <Button
               variant="outline"
               size="sm"
-              className="flex-1 text-xs"
+              className="text-xs shrink-0"
               onClick={() => fileInputRef.current?.click()}
+              title="Add more photos from camera roll"
             >
-              <Upload size={14} /> Add More
+              <Upload size={14} /> Add
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs shrink-0 text-violet-300 border-violet-500/30 hover:border-violet-400"
+              onClick={() => setIsCloudModalOpen(true)}
+              title="Import photos from folder or Google Drive links"
+            >
+              <Folder size={14} /> Drive
             </Button>
             <Button
               variant={isReady ? 'success' : 'primary'}
               size="md"
-              className="flex-2 text-xs font-bold"
+              className="flex-1 text-xs font-bold"
               onClick={onToggleReady}
             >
               <Check size={16} />
@@ -535,6 +635,14 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         onToggleExclude={toggleExclude}
         onRemovePhoto={removePhoto}
         onConfirm={handleConfirmReview}
+      />
+
+      {/* Cloud & Drive Import Modal */}
+      <CloudImportModal
+        isOpen={isCloudModalOpen}
+        onClose={() => setIsCloudModalOpen(false)}
+        onImportFiles={handleImportFolderFiles}
+        onImportUrls={handleImportUrls}
       />
     </div>
   )

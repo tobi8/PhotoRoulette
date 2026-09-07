@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { ExcludedMediaItem, MediaItem } from '../types/game'
-import { processMediaFile } from '../utils/imageCompression'
+import { processMediaFile, compressImageUrl } from '../utils/imageCompression'
 import { analyzeImageHeuristics } from '../utils/documentHeuristics'
 import { fisherYatesShuffle } from '../services/photoVaultService'
 
@@ -30,10 +30,12 @@ export interface ScanProgress {
   status: string
 }
 
+export type FilterResultItem = ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }
+
 export function useDocumentFilter() {
   const [isScanning, setIsScanning] = useState(false)
   const [progress, setProgress] = useState<ScanProgress>({ current: 0, total: 0, status: '' })
-  const [items, setItems] = useState<Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }>>([])
+  const [items, setItems] = useState<FilterResultItem[]>([])
 
   const classifierRef = useRef<any>(null)
   const isModelLoadingRef = useRef(false)
@@ -72,18 +74,16 @@ export function useDocumentFilter() {
     setIsScanning(true)
     setProgress({ current: 0, total: files.length, status: 'Preparing scanner...' })
 
-    // Try starting ML model in parallel
-    const mlPromise = initClassifier()
-
     const results: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
 
-    const BATCH_SIZE = 4
+    // Process 2 files at a time to prevent mobile browser memory exhaustion
+    const BATCH_SIZE = 2
     for (let i = 0; i < files.length; i += BATCH_SIZE) {
       const batch = files.slice(i, i + BATCH_SIZE)
       setProgress({
         current: Math.min(i + batch.length, files.length),
         total: files.length,
-        status: `Optimizing & scanning photos (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
+        status: `Processing photos (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
       })
 
       const batchResults = await Promise.all(
@@ -96,34 +96,9 @@ export function useDocumentFilter() {
             // 2. Run instant Canvas Heuristics (on thumbnail)
             const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl)
 
-            let isFlagged = heuristic.isDocument
-            let reason = heuristic.reason
-            let confidence = heuristic.confidence
-
-            // 3. If canvas heuristic is clean and item is an image, test ML classifier if available
-            if (!isFlagged && file.type.startsWith('image/')) {
-              try {
-                const classifier = await mlPromise
-                if (classifier) {
-                  const mlOutput = await classifier(compressed.thumbnailUrl, { topk: 3 })
-                  if (Array.isArray(mlOutput)) {
-                    for (const pred of mlOutput) {
-                      const label = (pred.label || '').toLowerCase()
-                      const score = pred.score || 0
-                      const isDocLabel = DOCUMENT_KEYWORDS.some((kw) => label.includes(kw))
-                      if (isDocLabel && score > 0.25) {
-                        isFlagged = true
-                        reason = `AI detected: ${pred.label} (${Math.round(score * 100)}% match)`
-                        confidence = Math.max(confidence, score)
-                        break
-                      }
-                    }
-                  }
-                }
-              } catch {
-                // Graceful fallback to heuristic result
-              }
-            }
+            const isFlagged = heuristic.isDocument && heuristic.confidence > 0.92
+            const reason = heuristic.reason || 'Verified photo'
+            const confidence = heuristic.confidence
 
             return {
               id: `media-${Date.now()}-${fileIndex}-${Math.random().toString(36).slice(2, 6)}`,
@@ -131,9 +106,9 @@ export function useDocumentFilter() {
               previewUrl: compressed.thumbnailUrl,
               dataUrl: compressed.dataUrl,
               type: compressed.type,
-              reason: reason || 'Verified safe photo',
+              reason,
               confidence,
-              isExcluded: isFlagged,
+              isExcluded: isFlagged, // Only exclude if extremely high confidence
             }
           } catch (err) {
             console.error(`Error processing file ${file.name}:`, err)
@@ -145,6 +120,9 @@ export function useDocumentFilter() {
       for (const res of batchResults) {
         if (res) results.push(res)
       }
+
+      // Small yield to allow UI rendering and browser garbage collection
+      await new Promise((resolve) => setTimeout(resolve, 15))
     }
 
     setItems(results)
@@ -159,12 +137,60 @@ export function useDocumentFilter() {
         ownerName: '',
         type: item.type,
         dataUrl: item.dataUrl,
+        previewUrl: item.previewUrl,
       }))
 
     const excluded: ExcludedMediaItem[] = results.filter((item) => item.isExcluded)
 
     return { accepted, excluded }
-  }, [initClassifier])
+  }, [])
+
+  /**
+   * Process a list of image URLs (such as Google Drive direct links)
+   */
+  const processUrls = useCallback(async (urlItems: Array<{ id: string; url: string; name?: string }>): Promise<MediaItem[]> => {
+    setIsScanning(true)
+    const accepted: MediaItem[] = []
+    const newItems: FilterResultItem[] = []
+
+    for (let i = 0; i < urlItems.length; i++) {
+      setProgress({
+        current: i + 1,
+        total: urlItems.length,
+        status: `Importing cloud photo (${i + 1} of ${urlItems.length})...`,
+      })
+
+      try {
+        const compressed = await compressImageUrl(urlItems[i].url)
+        accepted.push({
+          id: urlItems[i].id,
+          ownerId: '',
+          ownerName: '',
+          type: 'image',
+          dataUrl: compressed.dataUrl,
+          previewUrl: compressed.thumbnailUrl,
+        })
+        newItems.push({
+          id: urlItems[i].id,
+          previewUrl: compressed.thumbnailUrl,
+          dataUrl: compressed.dataUrl,
+          type: 'image',
+          reason: 'Clean photo',
+          confidence: 0,
+          isExcluded: false,
+        })
+      } catch (err) {
+        console.error('Failed to import URL:', urlItems[i].url, err)
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+
+    setItems(newItems)
+    setIsScanning(false)
+    setProgress({ current: urlItems.length, total: urlItems.length, status: 'Cloud import complete!' })
+    return accepted
+  }, [])
 
   /**
    * Allows user to un-exclude (restore) or manually exclude a photo in the review UI
@@ -266,6 +292,7 @@ export function useDocumentFilter() {
     progress,
     items,
     processFiles,
+    processUrls,
     loadExistingMedia,
     toggleExclude,
     removePhoto,

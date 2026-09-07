@@ -1,7 +1,7 @@
 /**
  * Client-Side Persistent Photo Vault (IndexedDB)
- * Allows players to store compressed photos safely on their device across game sessions.
- * 100% private: All data stays exclusively in the local browser database.
+ * Stores compressed photos safely on the user's device across game sessions.
+ * 100% private: All media stays strictly inside the local browser storage.
  */
 
 export interface VaultPhoto {
@@ -13,11 +13,13 @@ export interface VaultPhoto {
 }
 
 const DB_NAME = 'PhotoRouletteVaultDB'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE_NAME = 'vault_photos'
 
+let cachedDB: IDBDatabase | null = null
+
 /**
- * Standard uniform Fisher-Yates shuffle algorithm
+ * Uniform Fisher-Yates shuffle algorithm
  */
 export function fisherYatesShuffle<T>(array: T[]): T[] {
   const result = [...array]
@@ -28,10 +30,23 @@ export function fisherYatesShuffle<T>(array: T[]): T[] {
   return result
 }
 
-function openDB(): Promise<IDBDatabase> {
+/**
+ * Gets or opens the persistent IndexedDB connection without closing prematurely
+ */
+function getDB(): Promise<IDBDatabase> {
+  if (cachedDB) {
+    try {
+      // Test if connection is still usable
+      cachedDB.transaction(STORE_NAME, 'readonly')
+      return Promise.resolve(cachedDB)
+    } catch {
+      cachedDB = null
+    }
+  }
+
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
-      return reject(new Error('IndexedDB is not supported in this environment'))
+      return reject(new Error('IndexedDB is not supported in this browser'))
     }
 
     const request = window.indexedDB.open(DB_NAME, DB_VERSION)
@@ -43,47 +58,62 @@ function openDB(): Promise<IDBDatabase> {
       }
     }
 
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error || new Error('Failed to open IndexedDB'))
+    request.onsuccess = () => {
+      cachedDB = request.result
+      cachedDB.onversionchange = () => {
+        cachedDB?.close()
+        cachedDB = null
+      }
+      resolve(cachedDB)
+    }
+
+    request.onerror = () => {
+      reject(request.error || new Error('Failed to open IndexedDB'))
+    }
   })
 }
 
 /**
- * Save new photos to the local vault, skipping duplicate IDs
+ * Save photos to the local vault.
+ * Saves in safe batches to avoid browser transaction quota issues.
  */
 export async function savePhotosToVault(
-  photos: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string }>
+  photos: Array<{ id?: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string }>
 ): Promise<number> {
+  if (!photos || photos.length === 0) return 0
+
   try {
-    const db = await openDB()
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-
-    let savedCount = 0
+    const db = await getDB()
     const now = Date.now()
+    let savedCount = 0
 
-    for (const photo of photos) {
-      const entry: VaultPhoto = {
-        id: photo.id,
-        type: photo.type,
-        dataUrl: photo.dataUrl,
-        previewUrl: photo.previewUrl || photo.dataUrl,
-        addedAt: now,
-      }
-      store.put(entry)
-      savedCount++
+    // Process in batches of 20 to avoid transaction timeouts on mobile
+    const BATCH_SIZE = 20
+    for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+      const chunk = photos.slice(i, i + BATCH_SIZE)
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite')
+        const store = tx.objectStore(STORE_NAME)
+
+        for (const p of chunk) {
+          const id = p.id || `vault-${now}-${Math.random().toString(36).slice(2, 7)}`
+          const entry: VaultPhoto = {
+            id,
+            type: p.type || 'image',
+            dataUrl: p.dataUrl,
+            previewUrl: p.previewUrl || p.dataUrl,
+            addedAt: now,
+          }
+          store.put(entry)
+          savedCount++
+        }
+
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+      })
     }
 
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = () => {
-        db.close()
-        resolve(savedCount)
-      }
-      tx.onerror = () => {
-        db.close()
-        reject(tx.error)
-      }
-    })
+    return savedCount
   } catch (error) {
     console.error('Failed to save photos to vault:', error)
     return 0
@@ -95,18 +125,16 @@ export async function savePhotosToVault(
  */
 export async function getVaultCount(): Promise<number> {
   try {
-    const db = await openDB()
-    const tx = db.transaction(STORE_NAME, 'readonly')
-    const store = tx.objectStore(STORE_NAME)
-    const countRequest = store.count()
-
+    const db = await getDB()
     return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const store = tx.objectStore(STORE_NAME)
+      const countRequest = store.count()
+
       countRequest.onsuccess = () => {
-        db.close()
         resolve(countRequest.result || 0)
       }
       countRequest.onerror = () => {
-        db.close()
         resolve(0)
       }
     })
@@ -120,18 +148,16 @@ export async function getVaultCount(): Promise<number> {
  */
 export async function getAllVaultPhotos(): Promise<VaultPhoto[]> {
   try {
-    const db = await openDB()
-    const tx = db.transaction(STORE_NAME, 'readonly')
-    const store = tx.objectStore(STORE_NAME)
-    const request = store.getAll()
-
+    const db = await getDB()
     return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const store = tx.objectStore(STORE_NAME)
+      const request = store.getAll()
+
       request.onsuccess = () => {
-        db.close()
         resolve(request.result || [])
       }
       request.onerror = () => {
-        db.close()
         reject(request.error)
       }
     })
@@ -156,18 +182,12 @@ export async function sampleRandomFromVault(count = 15): Promise<VaultPhoto[]> {
  */
 export async function removePhotoFromVault(id: string): Promise<void> {
   try {
-    const db = await openDB()
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    tx.objectStore(STORE_NAME).delete(id)
+    const db = await getDB()
     return new Promise((resolve, reject) => {
-      tx.oncomplete = () => {
-        db.close()
-        resolve()
-      }
-      tx.onerror = () => {
-        db.close()
-        reject(tx.error)
-      }
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      tx.objectStore(STORE_NAME).delete(id)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
     })
   } catch (error) {
     console.error('Failed to remove photo from vault:', error)
@@ -179,18 +199,12 @@ export async function removePhotoFromVault(id: string): Promise<void> {
  */
 export async function clearVault(): Promise<void> {
   try {
-    const db = await openDB()
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    tx.objectStore(STORE_NAME).clear()
+    const db = await getDB()
     return new Promise((resolve, reject) => {
-      tx.oncomplete = () => {
-        db.close()
-        resolve()
-      }
-      tx.onerror = () => {
-        db.close()
-        reject(tx.error)
-      }
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      tx.objectStore(STORE_NAME).clear()
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
     })
   } catch (error) {
     console.error('Failed to clear photo vault:', error)

@@ -12,9 +12,9 @@ export interface CompressionResult {
 }
 
 /**
- * Resizes and compresses an image file to max 1280x720, JPEG ~75%, kept small for P2P WebRTC transfer.
+ * Resizes and compresses an image file to max 960x960, JPEG ~70%, kept small for P2P WebRTC transfer and IndexedDB storage.
  */
-export async function compressImage(file: File, maxDim = 1280, quality = 0.75): Promise<CompressionResult> {
+export async function compressImage(file: File, maxDim = 960, quality = 0.70): Promise<CompressionResult> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = reject
@@ -259,6 +259,63 @@ export async function processMediaFile(file: File): Promise<CompressionResult> {
     return processVideo(file)
   }
   return compressImage(file)
+}
+
+/**
+ * Loads an image from a URL (such as Google Drive direct CDN links) and compresses it
+ */
+export async function compressImageUrl(url: string, maxDim = 960, quality = 0.70): Promise<CompressionResult> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      let { width, height } = img
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width)
+          width = maxDim
+        } else {
+          width = Math.round((width * maxDim) / height)
+          height = maxDim
+        }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        return resolve({
+          dataUrl: url,
+          thumbnailUrl: url,
+          width: 800,
+          height: 600,
+          sizeBytes: 50000,
+          type: 'image',
+        })
+      }
+      ctx.drawImage(img, 0, 0, width, height)
+      const dataUrl = canvas.toDataURL('image/jpeg', quality)
+      resolve({
+        dataUrl,
+        thumbnailUrl: dataUrl,
+        width,
+        height,
+        sizeBytes: Math.round((dataUrl.length * 3) / 4),
+        type: 'image',
+      })
+    }
+    img.onerror = () => {
+      resolve({
+        dataUrl: url,
+        thumbnailUrl: url,
+        width: 800,
+        height: 600,
+        sizeBytes: 50000,
+        type: 'image',
+      })
+    }
+    img.src = url
+  })
 }
 
 /**
