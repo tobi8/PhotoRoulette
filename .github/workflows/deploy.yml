@@ -80,7 +80,7 @@ jobs:
       - name: Build Android Debug APK
         run: |
           cd android
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee ../gradle.log
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
@@ -88,3 +88,10 @@ jobs:
           name: PhotoRoulette-Android-Debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+
+      - name: Upload Build Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-failure-log
+          path: gradle.log
