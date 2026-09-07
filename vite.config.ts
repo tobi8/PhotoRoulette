@@ -9,6 +9,9 @@ export default defineConfig({
     tailwindcss(),
   ],
   base: './',
+  server: {
+    host: true,
+  },
   build: {
     target: 'esnext',
   },
