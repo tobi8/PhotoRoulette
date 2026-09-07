@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "cap": "cap",
     "test": "npx tsx test_runner.js",
     "lint": "oxlint",
     "preview": "vite preview"
@@ -13,6 +14,7 @@
   "dependencies": {
     "@capacitor-community/media": "^9.1.0",
     "@capacitor/android": "^8.5.1",
+    "@capacitor/cli": "^8.5.1",
     "@capacitor/core": "^8.5.1",
     "@capacitor/ios": "^8.5.1",
     "@tailwindcss/vite": "^4.3.3",
@@ -31,7 +33,6 @@
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.5.1",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
