@@ -58,7 +58,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     progress,
     items,
     processFiles,
-    runAiScan,
     loadExistingMedia,
     toggleExclude,
     removePhoto,
@@ -69,16 +68,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     getApprovedMedia,
   } = useDocumentFilter()
 
-  const handleRunAiScan = async () => {
-    const found = await runAiScan()
-    if (found > 0) {
-      setVaultMessage(`🛡️ Document filter complete: ${found} document${found > 1 ? 's' : ''} flagged for review.`)
-    } else {
-      setVaultMessage('🛡️ Document filter complete: All photos look clean!')
-    }
-    setTimeout(() => setVaultMessage(null), 4000)
-    onMediaReady(getApprovedMedia())
-  }
 
   // Check saved vault status on mount
   useEffect(() => {
@@ -436,10 +425,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </div>
           )}
 
-          {/* Quick iOS Swipe Tip */}
-          <div className="px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/5 text-[11px] text-gray-400 text-center leading-relaxed">
-            💡 <strong className="text-violet-300">iPhone Pro-Tip:</strong> In Apple Photos, tap <span className="text-white">"Select"</span> and slide your finger across rows to grab 50+ photos in 2 seconds!
-          </div>
 
           <div className="flex items-center gap-2">
             <div className="h-px bg-white/10 flex-1" />
@@ -545,9 +530,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               ))}
             </div>
 
-            <p className="text-[11px] text-gray-400 px-1 pt-0.5">
-              💡 {isSecretMode ? 'Blindfold mode: photos are blurred for surprise.' : 'Review your photos beforehand! Tap any photo to enlarge or ✕ to swap.'}
-            </p>
           </div>
 
           {/* Reroll & Review Buttons */}
@@ -573,50 +555,28 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </Button>
           </div>
 
-          {/* AI Document Filter Bar - Explicit Manual Initialization */}
-          <div className="p-3 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
-                🛡️
+          {/* Privacy summary - Automatic AI document filtering */}
+          {excludedCount > 0 ? (
+            <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={16} className="shrink-0" />
+                <span>
+                  {excludedCount} document{excludedCount > 1 ? 's' : ''}/receipt{excludedCount > 1 ? 's' : ''} automatically filtered out.
+                </span>
               </div>
-              <div>
-                <div className="text-xs font-bold text-white flex items-center gap-2">
-                  <span>AI Document & Receipt Filter</span>
-                  {excludedCount > 0 && (
-                    <span className="text-[10px] bg-amber-500/25 text-amber-300 px-2 py-0.5 rounded-full font-bold border border-amber-500/30">
-                      {excludedCount} Flagged
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] text-gray-400">
-                  {excludedCount > 0
-                    ? `${excludedCount} document/receipt hidden from game. Tap to review.`
-                    : 'Manual scan: filters out receipts, bills, and screenshots.'}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleRunAiScan}
-                disabled={isScanning}
-                className="bg-indigo-600/40 hover:bg-indigo-600 border-indigo-400/40 text-xs py-2 text-indigo-100 font-bold flex-1 sm:flex-initial"
+              <button
+                onClick={() => setIsPreviewModalOpen(true)}
+                className="text-[11px] underline font-bold hover:text-white shrink-0 cursor-pointer"
               >
-                <ShieldCheck size={14} className="text-indigo-300" />
-                <span>{isScanning ? 'Scanning...' : '🛡️ Start AI Document Scan'}</span>
-              </Button>
-              {excludedCount > 0 && (
-                <button
-                  onClick={() => setIsPreviewModalOpen(true)}
-                  className="text-xs text-amber-300 underline hover:text-white px-2 py-1 font-semibold"
-                >
-                  Review
-                </button>
-              )}
+                Review & Restore
+              </button>
             </div>
-          </div>
+          ) : (
+            <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/10 text-xs text-gray-300 flex items-center gap-2">
+              <ShieldCheck size={16} className="shrink-0 text-emerald-400" />
+              <span>All photos verified safe. Documents & receipts automatically filtered out.</span>
+            </div>
+          )}
 
           {/* Ready & Upload More Buttons */}
           <div className="flex gap-2 pt-1">

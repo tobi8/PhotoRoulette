@@ -38,24 +38,38 @@ export function useDocumentFilter() {
   const [items, setItems] = useState<FilterResultItem[]>([])
 
   /**
-   * Process uploaded files without automatically starting AI analysis
+   * Process uploaded files with automatic AI document analysis
    */
   const processFiles = useCallback(async (files: File[]): Promise<{
     accepted: MediaItem[]
     excluded: ExcludedMediaItem[]
   }> => {
+    setIsScanning(true)
+    setProgress({ current: 0, total: files.length, status: 'Preparing scanner...' })
+
     const results: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
 
     // Process 2 files at a time to prevent mobile browser memory exhaustion
     const BATCH_SIZE = 2
     for (let i = 0; i < files.length; i += BATCH_SIZE) {
       const batch = files.slice(i, i + BATCH_SIZE)
+      setProgress({
+        current: Math.min(i + batch.length, files.length),
+        total: files.length,
+        status: `Analyzing photos (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
+      })
+
       const batchResults = await Promise.all(
         batch.map(async (file, batchIdx) => {
           const fileIndex = i + batchIdx
           try {
-            // Compress media to JPEG
+            // 1. Compress media to JPEG
             const compressed = await processMediaFile(file)
+
+            // 2. Run instant Canvas Heuristic AI analysis
+            const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl, file.name)
+            const isFlagged = heuristic.isDocument && heuristic.confidence >= 0.90
+            const reason = isFlagged ? heuristic.reason : 'Verified safe photo'
 
             return {
               id: `media-${Date.now()}-${fileIndex}-${Math.random().toString(36).slice(2, 6)}`,
@@ -63,9 +77,9 @@ export function useDocumentFilter() {
               previewUrl: compressed.thumbnailUrl,
               dataUrl: compressed.dataUrl,
               type: compressed.type,
-              reason: 'User photo',
-              confidence: 0,
-              isExcluded: false, // Do not auto-exclude, no automatic AI scan
+              reason,
+              confidence: heuristic.confidence,
+              isExcluded: isFlagged,
             }
           } catch (err) {
             console.error(`Error processing file ${file.name}:`, err)
@@ -78,10 +92,12 @@ export function useDocumentFilter() {
         if (res) results.push(res)
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await new Promise((resolve) => setTimeout(resolve, 15))
     }
 
     setItems(results)
+    setIsScanning(false)
+    setProgress({ current: files.length, total: files.length, status: 'Scan complete!' })
 
     const accepted: MediaItem[] = results
       .filter((item) => !item.isExcluded)
@@ -204,23 +220,49 @@ export function useDocumentFilter() {
   }, [])
 
   /**
-   * Load mock demo photos for instant testing (no automatic scanning)
+   * Load mock demo photos (including one mock receipt) with automatic AI scan
    */
   const loadMockPhotosWithTestDocument = useCallback(async () => {
-    const { getMockPartyPhotos } = await import('../utils/mockData')
-    const partyItems = getMockPartyPhotos().slice(0, 15)
+    setIsScanning(true)
+    setProgress({ current: 0, total: 6, status: 'Generating demo party deck...' })
 
-    const mapped: FilterResultItem[] = partyItems.map((item) => ({
-      id: item.id,
-      previewUrl: item.dataUrl,
-      dataUrl: item.dataUrl,
-      type: item.type,
-      reason: 'Demo photo',
-      confidence: 0,
-      isExcluded: false,
-    }))
+    const { getMockPartyPhotos, generateMockPhoto } = await import('../utils/mockData')
+    const partyItems = getMockPartyPhotos().slice(0, 5)
 
-    setItems(mapped)
+    // Generate one simulated receipt
+    const mockReceipt = {
+      id: `mock-doc-${Date.now()}`,
+      type: 'image' as const,
+      dataUrl: generateMockPhoto('Mock Receipt', '#ffffff', '🧾', true),
+    }
+
+    const allToScan = [...partyItems, mockReceipt]
+    const scanned: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
+
+    for (let i = 0; i < allToScan.length; i++) {
+      const item = allToScan[i]
+      setProgress({
+        current: i + 1,
+        total: allToScan.length,
+        status: `Analyzing photo ${i + 1} of ${allToScan.length}...`,
+      })
+      const heuristic = await analyzeImageHeuristics(item.dataUrl)
+      scanned.push({
+        id: item.id,
+        previewUrl: item.dataUrl,
+        dataUrl: item.dataUrl,
+        type: item.type,
+        reason: heuristic.isDocument
+          ? 'Store receipt / invoice automatically detected by document scanner'
+          : 'Verified safe photo',
+        confidence: heuristic.confidence,
+        isExcluded: heuristic.isDocument,
+      })
+    }
+
+    setItems(scanned)
+    setIsScanning(false)
+    setProgress({ current: allToScan.length, total: allToScan.length, status: 'Demo pack loaded!' })
   }, [])
 
   /**
