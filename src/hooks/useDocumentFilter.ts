@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { ExcludedMediaItem, MediaItem } from '../types/game'
-import { compressImage } from '../utils/imageCompression'
+import { processMediaFile } from '../utils/imageCompression'
 import { analyzeImageHeuristics } from '../utils/documentHeuristics'
 
 const DOCUMENT_KEYWORDS = [
@@ -85,17 +85,17 @@ export function useDocumentFilter() {
       })
 
       try {
-        // 1. Resize and compress photo
-        const compressed = await compressImage(file, 1280, 0.75)
+        // 1. Process media (image or video) with mobile-safe timeout
+        const compressed = await processMediaFile(file)
 
-        // 2. Run instant Canvas Heuristics
+        // 2. Run instant Canvas Heuristics (on thumbnail)
         const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl)
 
         let isFlagged = heuristic.isDocument
         let reason = heuristic.reason
         let confidence = heuristic.confidence
 
-        // 3. If canvas heuristic is borderline or clean, test ML classifier if available
+        // 3. If canvas heuristic is clean and item is an image, test ML classifier if available
         if (!isFlagged && file.type.startsWith('image/')) {
           try {
             const classifier = await mlPromise
@@ -125,8 +125,8 @@ export function useDocumentFilter() {
           file,
           previewUrl: compressed.thumbnailUrl,
           dataUrl: compressed.dataUrl,
-          type: 'image',
-          reason: reason || 'Verified safe party photo',
+          type: compressed.type,
+          reason: reason || 'Verified safe photo',
           confidence,
           isExcluded: isFlagged,
         })
@@ -219,6 +219,13 @@ export function useDocumentFilter() {
     setProgress({ current: 6, total: 6, status: 'Demo pack loaded!' })
   }, [])
 
+  /**
+   * Reroll: Shuffles and randomly replaces items in current deck
+   */
+  const rerollDeck = useCallback(() => {
+    setItems((prev) => [...prev].sort(() => Math.random() - 0.5))
+  }, [])
+
   const acceptedCount = items.filter((i) => !i.isExcluded).length
   const excludedCount = items.filter((i) => i.isExcluded).length
 
@@ -231,6 +238,7 @@ export function useDocumentFilter() {
     removePhoto,
     clearPhotos,
     loadMockPhotosWithTestDocument,
+    rerollDeck,
     acceptedCount,
     excludedCount,
     getApprovedMedia: (): MediaItem[] =>

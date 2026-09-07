@@ -34,7 +34,7 @@ export interface ExcludedMediaItem {
 export interface GameSettings {
   roundDuration: number // 3, 5, 8, 10 seconds
   totalRounds: number   // 10, 15, 20
-  allowVideos: boolean  // <= 5s
+  mediaType: 'photos_only' | 'videos_only' | 'mixed'
   progressiveBlur: boolean // Sharpen over time vs instant reveal
   tvMode: boolean       // Host operates as TV/Big screen board
 }

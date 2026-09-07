@@ -50,7 +50,7 @@ import { Podium } from './components/scoreboard/Podium'
 const DEFAULT_SETTINGS: GameSettings = {
   roundDuration: 5,
   totalRounds: 10,
-  allowVideos: true,
+  mediaType: 'mixed',
   progressiveBlur: true,
   tvMode: false,
 }
@@ -561,6 +561,17 @@ export default function App() {
         }
       })
       mediaDeckRef.current = mockPhotos
+    }
+
+    // Filter mediaDeck according to host's mediaType setting
+    let filteredDeck = mediaDeckRef.current
+    if (settings.mediaType === 'photos_only') {
+      filteredDeck = filteredDeck.filter((m) => m.type === 'image')
+    } else if (settings.mediaType === 'videos_only') {
+      filteredDeck = filteredDeck.filter((m) => m.type === 'video')
+    }
+    if (filteredDeck.length > 0) {
+      mediaDeckRef.current = filteredDeck
     }
 
     // Shuffle media deck
@@ -1259,6 +1270,7 @@ export default function App() {
               progressiveBlur={settings.progressiveBlur}
               durationSec={activeRound.duration}
               isVetoed={activeRound.isVetoed}
+              isTimeUp={phase !== 'ACTIVE_ROUND'}
               isHostTV={settings.tvMode && currentPlayer?.isHost}
             />
 

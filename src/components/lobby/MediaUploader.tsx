@@ -1,5 +1,16 @@
 import React, { useRef, useState } from 'react'
-import { Upload, Sparkles, ShieldCheck, ShieldAlert, Eye, Check, Shuffle, Camera } from 'lucide-react'
+import {
+  Upload,
+  ShieldCheck,
+  ShieldAlert,
+  Eye,
+  Check,
+  Shuffle,
+  Camera,
+  RotateCw,
+  X,
+  PlayCircle,
+} from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { DocumentScanner } from '../ml/DocumentScanner'
@@ -19,7 +30,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
-  const [autoSelectedCount, setAutoSelectedCount] = useState<number>(0)
 
   const {
     isScanning,
@@ -29,12 +39,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     toggleExclude,
     removePhoto,
     loadMockPhotosWithTestDocument,
+    rerollDeck,
     acceptedCount,
     excludedCount,
     getApprovedMedia,
   } = useDocumentFilter()
 
-  // Handle camera roll selection: automatically pick random 15-20 items, filter, and mark ready!
+  // Handle camera roll selection: automatically pick random subset, filter, and mark ready!
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       let filesArray = Array.from(e.target.files)
@@ -44,12 +55,10 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         filesArray = filesArray.sort(() => Math.random() - 0.5).slice(0, 15)
       }
 
-      setAutoSelectedCount(filesArray.length)
-
       const { accepted } = await processFiles(filesArray)
       onMediaReady(accepted)
 
-      // Automatically mark ready without requiring manual click!
+      // Automatically mark ready
       if (!isReady && accepted.length > 0) {
         onToggleReady()
       }
@@ -61,7 +70,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     await loadMockPhotosWithTestDocument()
     setTimeout(() => {
       const approved = getApprovedMedia()
-      setAutoSelectedCount(approved.length)
       onMediaReady(approved)
       if (!isReady) {
         onToggleReady()
@@ -69,11 +77,29 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }, 150)
   }
 
+  // Reroll photos in roulette pool (like in the real Photo Roulette)
+  const handleReroll = () => {
+    rerollDeck()
+    setTimeout(() => {
+      onMediaReady(getApprovedMedia())
+    }, 50)
+  }
+
+  const handleRemoveSingle = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    removePhoto(id)
+    setTimeout(() => {
+      onMediaReady(getApprovedMedia())
+    }, 50)
+  }
+
   const handleConfirmReview = () => {
     setIsPreviewModalOpen(false)
     const approved = getApprovedMedia()
     onMediaReady(approved)
   }
+
+  const approvedItems = items.filter((i) => !i.isExcluded)
 
   return (
     <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl space-y-3">
@@ -84,13 +110,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             <span className="text-xl">📸</span>
           </h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            Auto-selects photos & videos • AI filters documents
+            Auto-selects photos & videos • AI drops sensitive documents
           </p>
         </div>
 
         {acceptedCount > 0 && (
           <Badge variant="success" size="md">
-            {acceptedCount} Auto-Selected
+            {acceptedCount} In Deck
           </Badge>
         )}
       </div>
@@ -123,7 +149,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 📱 Auto-Select from Camera Roll
               </div>
               <div className="text-xs text-violet-300/80 mt-1 max-w-xs">
-                Tap to grant access — the app will automatically pick 15 random photos & videos from your gallery!
+                Select your photos/videos — the app automatically samples 15 random items and drops private documents!
               </div>
             </div>
           </button>
@@ -143,59 +169,107 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             className="border-violet-500/30 text-xs text-violet-200 py-3"
           >
             <Shuffle size={16} className="text-amber-400" />
-            <span>⚡ 1-Tap Instant Auto-Roll (Pre-Loaded Camera Roll)</span>
+            <span>⚡ 1-Tap Instant Auto-Roll (Pre-Loaded Memories)</span>
           </Button>
         </div>
       )}
 
-      {/* Once loaded: Shows summary, auto-ready status, and review option */}
+      {/* Once loaded: Shows REROLL deck preview, auto-ready status, and review option */}
       {items.length > 0 && !isScanning && (
         <div className="space-y-3">
-          <div className="bg-white/5 rounded-2xl p-3.5 border border-white/10 flex items-center justify-between">
-            <div className="min-w-0">
-              <div className="font-bold text-sm text-white flex items-center gap-2">
-                <ShieldCheck size={16} className="text-emerald-400 shrink-0" />
-                <span>{acceptedCount} Photos/Videos In Game</span>
-              </div>
-              {excludedCount > 0 ? (
-                <div className="text-xs text-amber-300 flex items-center gap-1.5 mt-0.5">
-                  <ShieldAlert size={14} className="shrink-0" />
-                  <span>{excludedCount} receipts/documents automatically dropped</span>
-                </div>
-              ) : (
-                <div className="text-xs text-gray-400 mt-0.5">
-                  Camera roll automatically shuffled & verified safe
-                </div>
-              )}
+          {/* Real Photo Roulette Deck Preview Carousel */}
+          <div>
+            <div className="flex items-center justify-between text-xs text-gray-300 font-bold mb-1.5 px-1">
+              <span>YOUR ROULETTE POOL ({approvedItems.length})</span>
+              <span className="text-[11px] text-gray-400">Tap ✕ to remove sensitive items</span>
             </div>
 
+            {/* Horizontal thumbnail scroller */}
+            <div className="flex gap-2 overflow-x-auto pb-2 pt-1 scrollbar-thin">
+              {approvedItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-white/20 group bg-black/60"
+                >
+                  <img
+                    src={item.previewUrl || item.dataUrl}
+                    alt="Deck photo"
+                    className="w-full h-full object-cover"
+                  />
+                  {item.type === 'video' && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
+                      <PlayCircle size={18} className="text-white drop-shadow" />
+                    </div>
+                  )}
+                  {/* Single Photo Remove */}
+                  <button
+                    onClick={(e) => handleRemoveSingle(item.id, e)}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 hover:bg-red-600 text-white flex items-center justify-center text-xs transition-colors cursor-pointer"
+                    title="Remove this photo from game"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Reroll Button (Real Photo Roulette Style) */}
+          <div className="flex gap-2">
             <Button
-              size="sm"
+              variant="secondary"
+              size="md"
+              className="flex-1 text-xs border-amber-500/30 text-amber-200"
+              onClick={handleReroll}
+            >
+              <RotateCw size={14} className="text-amber-400" />
+              <span>🎲 Reroll Photos</span>
+            </Button>
+
+            <Button
+              size="md"
               variant="outline"
               onClick={() => setIsPreviewModalOpen(true)}
-              className="text-xs shrink-0"
+              className="text-xs"
             >
-              <Eye size={14} /> Review
+              <Eye size={14} />
+              <span>Review ({excludedCount} filtered)</span>
             </Button>
           </div>
 
-          <div className="flex gap-2">
+          {/* Privacy summary */}
+          {excludedCount > 0 ? (
+            <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300 flex items-center gap-2">
+              <ShieldAlert size={16} className="shrink-0" />
+              <span>
+                {excludedCount} receipts/documents were automatically excluded for privacy.
+              </span>
+            </div>
+          ) : (
+            <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
+              <ShieldCheck size={16} className="shrink-0" />
+              <span>Privacy filter verified: all photos look safe to share!</span>
+            </div>
+          )}
+
+          {/* Ready & Upload More Buttons */}
+          <div className="flex gap-2 pt-1">
             <Button
               variant="outline"
               size="sm"
               className="flex-1 text-xs"
               onClick={() => fileInputRef.current?.click()}
             >
-              <Upload size={14} /> Change Photos
+              <Upload size={14} /> Add More
             </Button>
             <Button
               variant={isReady ? 'success' : 'primary'}
               size="md"
-              className="flex-2"
+              className="flex-2 text-xs"
               onClick={onToggleReady}
             >
               <Check size={16} />
-              {isReady ? 'Ready in Lobby (Click to Unready)' : "I'm Ready"}
+              {isReady ? 'Ready in Lobby (Tap to Cancel)' : "I'm Ready"}
             </Button>
           </div>
         </div>

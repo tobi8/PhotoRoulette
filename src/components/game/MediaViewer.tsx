@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ShieldAlert, AlertTriangle } from 'lucide-react'
 
 interface MediaViewerProps {
@@ -10,6 +10,7 @@ interface MediaViewerProps {
   progressiveBlur?: boolean
   durationSec?: number
   isVetoed?: boolean
+  isTimeUp?: boolean
   isHostTV?: boolean
 }
 
@@ -18,23 +19,43 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
   progressiveBlur = false,
   durationSec = 5,
   isVetoed = false,
+  isTimeUp = false,
   isHostTV = false,
 }) => {
   const [blurAmount, setBlurAmount] = useState(progressiveBlur ? 24 : 0)
+  const videoRef = useRef<HTMLVideoElement>(null)
 
+  // Manage video playback: automatically pauses when time expires or vetoed!
+  useEffect(() => {
+    if (media.type === 'video' && videoRef.current) {
+      if (isTimeUp || isVetoed) {
+        videoRef.current.pause()
+      } else {
+        videoRef.current.currentTime = 0
+        videoRef.current.play().catch(() => {
+          // Fallback if browser requires muted autoplay
+          if (videoRef.current) {
+            videoRef.current.muted = true
+            videoRef.current.play().catch(() => {})
+          }
+        })
+      }
+    }
+  }, [media.type, isTimeUp, isVetoed, media.id])
+
+  // Progressive blur animation
   useEffect(() => {
     if (!progressiveBlur) {
       setBlurAmount(0)
       return
     }
 
-    // Progressively reduce blur from 24px to 0px
     const start = Date.now()
     const totalMs = durationSec * 1000
 
     const interval = setInterval(() => {
       const elapsed = Date.now() - start
-      const factor = Math.min(1, elapsed / (totalMs * 0.85)) // reach full clarity at 85% time
+      const factor = Math.min(1, elapsed / (totalMs * 0.85))
       const currentBlur = Math.max(0, 24 * (1 - factor))
       setBlurAmount(currentBlur)
 
@@ -56,11 +77,11 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
       {!isVetoed ? (
         media.type === 'video' ? (
           <video
+            ref={videoRef}
             src={media.dataUrl}
             autoPlay
-            loop
-            muted
             playsInline
+            muted={false}
             className="w-full h-full object-contain"
             style={{
               filter: `blur(${blurAmount}px)`,
@@ -100,7 +121,6 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
             The owner invoked privacy veto! 0 points awarded this round.
           </p>
 
-          {/* Hazard diagonal stripes bottom bar */}
           <div
             className="absolute bottom-0 left-0 right-0 h-4 bg-repeat-x opacity-70"
             style={{
