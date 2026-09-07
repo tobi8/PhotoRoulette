@@ -204,44 +204,23 @@ export function useDocumentFilter() {
   }, [])
 
   /**
-   * Load mock demo photos (including one mock receipt) for instant testing
+   * Load mock demo photos for instant testing (no automatic scanning)
    */
   const loadMockPhotosWithTestDocument = useCallback(async () => {
-    setIsScanning(true)
-    setProgress({ current: 0, total: 5, status: 'Generating mock party deck...' })
+    const { getMockPartyPhotos } = await import('../utils/mockData')
+    const partyItems = getMockPartyPhotos().slice(0, 15)
 
-    const { getMockPartyPhotos, generateMockPhoto } = await import('../utils/mockData')
-    const partyItems = getMockPartyPhotos().slice(0, 5)
+    const mapped: FilterResultItem[] = partyItems.map((item) => ({
+      id: item.id,
+      previewUrl: item.dataUrl,
+      dataUrl: item.dataUrl,
+      type: item.type,
+      reason: 'Demo photo',
+      confidence: 0,
+      isExcluded: false,
+    }))
 
-    // Generate one simulated receipt
-    const mockReceipt = {
-      id: `mock-doc-${Date.now()}`,
-      type: 'image' as const,
-      dataUrl: generateMockPhoto('Mock Receipt', '#ffffff', '🧾', true),
-    }
-
-    const allToScan = [...partyItems, mockReceipt]
-    const scanned: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
-
-    for (let i = 0; i < allToScan.length; i++) {
-      const item = allToScan[i]
-      const heuristic = await analyzeImageHeuristics(item.dataUrl)
-      scanned.push({
-        id: item.id,
-        previewUrl: item.dataUrl,
-        dataUrl: item.dataUrl,
-        type: item.type,
-        reason: heuristic.isDocument
-          ? 'Store receipt / invoice automatically detected by document scanner'
-          : 'Verified safe photo',
-        confidence: heuristic.confidence,
-        isExcluded: heuristic.isDocument,
-      })
-    }
-
-    setItems(scanned)
-    setIsScanning(false)
-    setProgress({ current: 6, total: 6, status: 'Demo pack loaded!' })
+    setItems(mapped)
   }, [])
 
   /**

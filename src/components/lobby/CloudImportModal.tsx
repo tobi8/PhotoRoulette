@@ -1,35 +1,49 @@
-import React, { useRef, useState } from 'react'
-import { Folder, Link, Cloud, Sparkles, X, Check, Database, AlertCircle } from 'lucide-react'
+import React, { useRef, useState, useEffect } from 'react'
+import { Folder, Cloud, Sparkles, Check, AlertCircle, HardDrive, UploadCloud, Settings, Key } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { fisherYatesShuffle } from '../../services/photoVaultService'
+import {
+  openGoogleDriveOnlinePicker,
+  getSavedGoogleClientId,
+  saveGoogleClientId,
+} from '../../services/googleDrivePickerService'
 
 interface CloudImportModalProps {
   isOpen: boolean
   onClose: () => void
   onImportFiles: (files: File[]) => Promise<void>
-  onImportUrls: (urls: Array<{ id: string; url: string; name?: string }>) => Promise<void>
 }
 
 export const CloudImportModal: React.FC<CloudImportModalProps> = ({
   isOpen,
   onClose,
   onImportFiles,
-  onImportUrls,
 }) => {
   const folderInputRef = useRef<HTMLInputElement>(null)
-  const driveFilesInputRef = useRef<HTMLInputElement>(null)
-  const [pastedLinks, setPastedLinks] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
+  const [pickerStatus, setPickerStatus] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
 
-  // Handle folder selection via webkitdirectory (Google Drive synced folder, iCloud, or local folder)
+  // Google OAuth Client ID setup state
+  const [savedClientId, setSavedClientId] = useState('')
+  const [clientIdInput, setClientIdInput] = useState('')
+  const [showClientIdSetup, setShowClientIdSetup] = useState(false)
+
+  useEffect(() => {
+    const id = getSavedGoogleClientId()
+    setSavedClientId(id)
+    setClientIdInput(id)
+  }, [isOpen])
+
+  // Handle folder selection via webkitdirectory (Google Drive synced folder, iCloud, or local disk)
   const handleFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const allFiles = Array.from(e.target.files)
 
-      // Filter only image and video files
+      // Filter only image and video files (including HEIC / HEIF)
       const mediaFiles = allFiles.filter((f) => {
         const isMediaMime = f.type.startsWith('image/') || f.type.startsWith('video/')
         const isMediaExt = /\.(jpe?g|png|webp|gif|heic|heif|mp4|mov|m4v)$/i.test(f.name)
@@ -44,7 +58,6 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
       setIsProcessing(true)
       setErrorMessage(null)
       try {
-        // Randomly shuffle all files from the folder
         const shuffled = fisherYatesShuffle(mediaFiles)
         await onImportFiles(shuffled)
         setSuccessMessage(`Imported ${mediaFiles.length} photos from folder!`)
@@ -53,97 +66,187 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
           setSuccessMessage(null)
           setIsProcessing(false)
         }, 1200)
-      } catch (err) {
+      } catch {
         setErrorMessage('Failed to import folder photos.')
         setIsProcessing(false)
       }
     }
   }
 
-  // Handle pasted Google Drive or image URLs
-  const handleImportLinks = async () => {
-    if (!pastedLinks.trim()) return
+  // Handle Drag & Drop from Google Drive or Desktop
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
 
     setIsProcessing(true)
     setErrorMessage(null)
+    setPickerStatus('Reading dropped files...')
 
     try {
-      const lines = pastedLinks.split(/[\n,]+/).map((l) => l.trim()).filter(Boolean)
-      const importedUrls: Array<{ id: string; url: string; name?: string }> = []
-
-      for (const line of lines) {
-        // 1. Google Drive link format: /file/d/FILE_ID or id=FILE_ID
-        const driveMatch = line.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || line.match(/id=([a-zA-Z0-9_-]+)/)
-        if (driveMatch && driveMatch[1]) {
-          const fileId = driveMatch[1]
-          // Standard Google Drive high-resolution thumbnail endpoint
-          const directUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`
-          importedUrls.push({
-            id: `gdrive-${fileId}`,
-            url: directUrl,
-            name: `Google Drive Photo (${fileId.slice(0, 5)})`,
-          })
-          continue
+      const files: File[] = []
+      if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+        const items = Array.from(e.dataTransfer.items)
+        for (const item of items) {
+          const entry = (item as any).webkitGetAsEntry ? (item as any).webkitGetAsEntry() : null
+          if (entry) {
+            await readEntryRecursive(entry, files)
+          } else {
+            const f = item.getAsFile()
+            if (f) files.push(f)
+          }
         }
-
-        // 2. Direct web image link
-        if (/^https?:\/\/.+\.(jpe?g|png|webp|gif)/i.test(line) || line.startsWith('https://')) {
-          importedUrls.push({
-            id: `link-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            url: line,
-          })
-        }
+      } else if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        files.push(...Array.from(e.dataTransfer.files))
       }
 
-      if (importedUrls.length === 0) {
-        setErrorMessage('Could not find valid Google Drive file links or image URLs. Make sure links are set to "Anyone with link can view".')
+      const mediaFiles = files.filter((f) => {
+        const isMediaMime = f.type.startsWith('image/') || f.type.startsWith('video/')
+        const isMediaExt = /\.(jpe?g|png|webp|gif|heic|heif|mp4|mov|m4v)$/i.test(f.name)
+        return isMediaMime || isMediaExt
+      })
+
+      if (mediaFiles.length === 0) {
+        setErrorMessage('No photos found in the dropped items.')
         setIsProcessing(false)
+        setPickerStatus(null)
         return
       }
 
-      // Shuffle imported links
-      const shuffled = fisherYatesShuffle(importedUrls)
-      await onImportUrls(shuffled)
-
-      setSuccessMessage(`Imported ${importedUrls.length} cloud photos!`)
+      const shuffled = fisherYatesShuffle(mediaFiles)
+      await onImportFiles(shuffled)
+      setSuccessMessage(`Imported ${mediaFiles.length} photos successfully!`)
       setTimeout(() => {
         onClose()
-        setPastedLinks('')
         setSuccessMessage(null)
         setIsProcessing(false)
+        setPickerStatus(null)
       }, 1200)
-    } catch (err) {
-      setErrorMessage('Failed to load photos from the provided links.')
+    } catch {
+      setErrorMessage('Failed to read dropped files.')
       setIsProcessing(false)
+      setPickerStatus(null)
+    }
+  }
+
+  const readEntryRecursive = async (entry: any, outFiles: File[]): Promise<void> => {
+    if (entry.isFile) {
+      await new Promise<void>((resolve) => {
+        entry.file(
+          (file: File) => {
+            outFiles.push(file)
+            resolve()
+          },
+          () => resolve()
+        )
+      })
+    } else if (entry.isDirectory) {
+      const dirReader = entry.createReader()
+      const readNextBatch = async (): Promise<any[]> => {
+        return new Promise((resolve) => {
+          dirReader.readEntries(
+            (entries: any[]) => resolve(entries),
+            () => resolve([])
+          )
+        })
+      }
+      let batch = await readNextBatch()
+      while (batch && batch.length > 0) {
+        for (const child of batch) {
+          await readEntryRecursive(child, outFiles)
+        }
+        batch = await readNextBatch()
+      }
+    }
+  }
+
+  // Handle Online Google Drive Picker
+  const handleOpenGoogleDrive = async () => {
+    const activeClientId = clientIdInput.trim() || savedClientId
+    if (!activeClientId) {
+      setShowClientIdSetup(true)
+      return
+    }
+
+    setIsProcessing(true)
+    setErrorMessage(null)
+    setPickerStatus('Connecting to Google Drive...')
+
+    try {
+      const files = await openGoogleDriveOnlinePicker({
+        clientId: activeClientId,
+        onProgress: (status) => setPickerStatus(status),
+      })
+
+      if (!files || files.length === 0) {
+        setIsProcessing(false)
+        setPickerStatus(null)
+        return
+      }
+
+      const shuffled = fisherYatesShuffle(files)
+      await onImportFiles(shuffled)
+      setSuccessMessage(`Imported ${files.length} photos from Google Drive!`)
+      setTimeout(() => {
+        onClose()
+        setSuccessMessage(null)
+        setIsProcessing(false)
+        setPickerStatus(null)
+      }, 1200)
+    } catch (err: any) {
+      console.error('Google Drive error:', err)
+      if (err.message === 'MISSING_CLIENT_ID') {
+        setShowClientIdSetup(true)
+      } else {
+        setErrorMessage(err.message || 'Failed to load photos from Google Drive.')
+      }
+      setIsProcessing(false)
+      setPickerStatus(null)
+    }
+  }
+
+  const handleSaveClientId = () => {
+    saveGoogleClientId(clientIdInput)
+    setSavedClientId(clientIdInput.trim())
+    setShowClientIdSetup(false)
+    if (clientIdInput.trim()) {
+      handleOpenGoogleDrive()
     }
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Import Photos from Drive or Folder" maxWidth="md">
+    <Modal isOpen={isOpen} onClose={onClose} title="Import Photos from Google Drive or Folder" maxWidth="md">
       <div className="space-y-4 text-white">
-        <p className="text-xs text-gray-300">
-          Load a collection of photos directly from a synced folder or Google Drive. The app will randomly select photos for your game deck!
+        <p className="text-xs text-gray-300 leading-relaxed">
+          Select photos or entire folders directly from Google Drive online or your computer. The app randomly selects mystery photos for your game deck!
         </p>
 
         {errorMessage && (
-          <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/40 text-xs text-red-300 flex items-center gap-2">
+          <div className="p-3 rounded-xl bg-red-950/50 border border-red-500/40 text-xs text-red-300 flex items-center gap-2">
             <AlertCircle size={16} className="shrink-0 text-red-400" />
             <span>{errorMessage}</span>
           </div>
         )}
 
+        {pickerStatus && (
+          <div className="p-3 rounded-xl bg-violet-950/50 border border-violet-500/40 text-xs text-violet-200 flex items-center gap-2 animate-pulse">
+            <Sparkles size={16} className="shrink-0 text-amber-400" />
+            <span>{pickerStatus}</span>
+          </div>
+        )}
+
         {successMessage && (
-          <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-xs text-emerald-300 flex items-center gap-2">
+          <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-500/40 text-xs text-emerald-300 flex items-center gap-2">
             <Check size={16} className="shrink-0 text-emerald-400" />
             <span>{successMessage}</span>
           </div>
         )}
 
-        {/* Hidden inputs: Mobile Drive files & Desktop directory */}
+        {/* Hidden directory input */}
         <input
           ref={folderInputRef}
           type="file"
-          // @ts-expect-error webkitdirectory is standard in HTML5 but missing in React HTMLAttributes
+          // @ts-expect-error webkitdirectory is standard in modern browsers
           webkitdirectory=""
           directory=""
           multiple
@@ -151,60 +254,109 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
           onChange={handleFolderSelect}
         />
 
-        <input
-          ref={driveFilesInputRef}
-          type="file"
-          multiple
-          accept="image/*,video/*"
-          className="hidden"
-          onChange={handleFolderSelect}
-        />
-
-        {/* Option 1: Mobile Phone Google Drive Folder (Android / iPhone) */}
-        <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/40 via-teal-950/30 to-slate-900 border border-emerald-500/30 space-y-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300 text-lg">
-              📱
-            </div>
-            <div>
-              <div className="font-bold text-sm text-white flex items-center gap-2">
-                <span>Google Drive on Phone / Tablet</span>
-                <span className="text-[10px] bg-emerald-500/25 text-emerald-300 px-2 py-0.5 rounded-full font-mono font-bold">
-                  Easiest on Mobile
-                </span>
+        {/* Option 1: Google Drive Online Cloud Picker */}
+        <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-950/40 via-indigo-950/30 to-slate-900 border border-blue-500/30 space-y-3 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-300 text-xl shadow-inner">
+                🌐
               </div>
-              <div className="text-[11px] text-gray-300 mt-0.5">
-                Android Files / iPhone Files & Google Drive app
+              <div>
+                <div className="font-bold text-sm text-white flex items-center gap-2">
+                  <span>Google Drive Online</span>
+                  <span className="text-[10px] bg-blue-500/25 text-blue-300 px-2 py-0.5 rounded-full font-mono font-bold">
+                    Cloud
+                  </span>
+                </div>
+                <div className="text-[11px] text-gray-300 mt-0.5">
+                  Browse your online Google Drive folders and see all files
+                </div>
               </div>
             </div>
+
+            <button
+              onClick={() => setShowClientIdSetup(!showClientIdSetup)}
+              className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+              title="Google Drive Settings"
+            >
+              <Settings size={15} />
+            </button>
           </div>
 
-          <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 text-[11px] text-gray-300 space-y-1">
-            <div>🤖 <strong>Android:</strong> Tap below → tap <span className="text-white">Files</span> → open menu (☰) → tap <strong className="text-emerald-300">Google Drive</strong> → open folder → tap <strong>⋮</strong> & <strong>Select all</strong></div>
-            <div>🍎 <strong>iPhone:</strong> Tap below → tap <span className="text-white">Choose Files</span> → tap <strong className="text-emerald-300">Google Drive</strong> under Locations → open folder → tap <strong>Select All</strong></div>
-          </div>
+          {/* Client ID Configuration Drawer */}
+          {showClientIdSetup && (
+            <div className="p-3 rounded-xl bg-black/40 border border-white/10 space-y-2 text-xs text-gray-300">
+              <div className="font-semibold text-white flex items-center gap-1.5">
+                <Key size={13} className="text-amber-400" />
+                <span>Google OAuth Client ID</span>
+              </div>
+              <p className="text-[11px] text-gray-400 leading-tight">
+                To connect directly to Google Drive online in your browser, enter your Google Cloud OAuth Client ID:
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={clientIdInput}
+                  onChange={(e) => setClientIdInput(e.target.value)}
+                  placeholder="e.g. 123456789-abc.apps.googleusercontent.com"
+                  className="flex-1 bg-black/60 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono"
+                />
+                <Button variant="secondary" size="sm" onClick={handleSaveClientId} className="text-xs shrink-0">
+                  Save
+                </Button>
+              </div>
+            </div>
+          )}
 
           <Button
             variant="primary"
             size="md"
             fullWidth
-            onClick={() => driveFilesInputRef.current?.click()}
+            onClick={handleOpenGoogleDrive}
             disabled={isProcessing}
-            className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-xs py-3 font-black shadow-lg"
+            className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 text-xs py-3 font-black shadow-lg"
           >
-            <span>📱 Open Drive Folder on Phone</span>
+            <UploadCloud size={16} />
+            <span>🌐 Browse Google Drive Online</span>
           </Button>
         </div>
 
-        {/* Option 2: Desktop Computer Folder (Mac / PC) */}
+        {/* Option 2: Drag and Drop from Google Drive or Desktop */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            setIsDragging(true)
+          }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={handleDrop}
+          className={`p-4 rounded-2xl border-2 border-dashed transition-all flex flex-col items-center justify-center text-center gap-2 cursor-pointer ${
+            isDragging
+              ? 'border-emerald-400 bg-emerald-950/30'
+              : 'border-white/15 bg-white/[0.02] hover:border-violet-400/50 hover:bg-violet-950/10'
+          }`}
+        >
+          <div className="w-10 h-10 rounded-xl bg-violet-600/20 border border-violet-400/30 flex items-center justify-center text-violet-300">
+            <HardDrive size={20} />
+          </div>
+          <div>
+            <div className="font-bold text-xs text-white">
+              Drag & Drop Photos or Folders Here
+            </div>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              Drag photos straight from your online Google Drive tab or your files
+            </div>
+          </div>
+        </div>
+
+        {/* Option 3: Synced Google Drive Folder / Desktop Folder */}
         <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-900/30 to-indigo-950/40 border border-violet-500/30 space-y-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-violet-600/30 border border-violet-400/40 flex items-center justify-center text-violet-300 text-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-violet-600/30 border border-violet-400/40 flex items-center justify-center text-violet-300 text-xl">
               💻
             </div>
             <div>
-              <div className="font-bold text-sm text-white flex items-center gap-2">
-                <span>Entire Folder on Computer (Mac / PC)</span>
+              <div className="font-bold text-sm text-white">
+                Synced Google Drive / Computer Folder
               </div>
               <div className="text-[11px] text-gray-400 mt-0.5">
                 Picks entire folder via Google Drive for Desktop or local disk
@@ -222,43 +374,6 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
           >
             <Folder size={15} />
             <span>💻 Pick Entire Folder on Computer</span>
-          </Button>
-        </div>
-
-        {/* Option 2: Paste Google Drive Links */}
-        <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-950 border border-white/10 space-y-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-300">
-              <Link size={20} />
-            </div>
-            <div>
-              <div className="font-bold text-sm text-white">
-                Paste Google Drive Links / Image URLs
-              </div>
-              <div className="text-[11px] text-gray-400 mt-0.5">
-                Paste shared links (set to "Anyone with the link can view")
-              </div>
-            </div>
-          </div>
-
-          <textarea
-            value={pastedLinks}
-            onChange={(e) => setPastedLinks(e.target.value)}
-            placeholder="https://drive.google.com/file/d/1a2b3c.../view&#10;https://drive.google.com/file/d/4d5e6f.../view"
-            rows={3}
-            className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 font-mono resize-none"
-          />
-
-          <Button
-            variant="secondary"
-            size="md"
-            fullWidth
-            onClick={handleImportLinks}
-            disabled={isProcessing || !pastedLinks.trim()}
-            className="text-xs py-2.5 font-bold"
-          >
-            <Cloud size={15} />
-            <span>Import from Links</span>
           </Button>
         </div>
 

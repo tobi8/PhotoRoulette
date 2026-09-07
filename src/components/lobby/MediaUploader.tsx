@@ -58,7 +58,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     progress,
     items,
     processFiles,
-    processUrls,
     runAiScan,
     loadExistingMedia,
     toggleExclude,
@@ -183,40 +182,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
-  // Handle Google Drive links / cloud image URLs import
-  const handleImportUrls = async (urlItems: Array<{ id: string; url: string; name?: string }>) => {
-    const accepted = await processUrls(urlItems)
-    if (accepted.length > 0) {
-      await savePhotosToVault(
-        accepted.map((m) => ({
-          id: m.id,
-          type: m.type,
-          dataUrl: m.dataUrl,
-        }))
-      )
-      const updatedCount = await getVaultCount()
-      setVaultCount(updatedCount)
-
-      const activeSample = await sampleRandomFromVault(15)
-      loadExistingMedia(activeSample)
-
-      const mapped = activeSample.map((s) => ({
-        id: s.id,
-        ownerId: '',
-        ownerName: '',
-        type: s.type,
-        dataUrl: s.dataUrl,
-      }))
-      onMediaReady(mapped)
-
-      if (!isReady) {
-        onToggleReady()
-      }
-
-      setVaultMessage(`🎉 ${accepted.length} cloud photos imported & saved to Vault! Total pool: ${updatedCount}`)
-      setTimeout(() => setVaultMessage(null), 4500)
-    }
-  }
 
   // 1-Tap Mystery Roll from persistent IndexedDB Vault
   const handleRollFromVault = async () => {
@@ -608,37 +573,50 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </Button>
           </div>
 
-          {/* Privacy summary */}
-          {excludedCount > 0 ? (
-            <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <ShieldAlert size={16} className="shrink-0" />
-                <span>
-                  {excludedCount} document{excludedCount > 1 ? 's' : ''}/receipt{excludedCount > 1 ? 's' : ''} filtered out.
-                </span>
+          {/* AI Document Filter Bar - Explicit Manual Initialization */}
+          <div className="p-3 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
+                🛡️
               </div>
-              <button
-                onClick={() => setIsPreviewModalOpen(true)}
-                className="text-[11px] underline font-bold hover:text-white shrink-0 cursor-pointer"
-              >
-                Review & Restore
-              </button>
+              <div>
+                <div className="text-xs font-bold text-white flex items-center gap-2">
+                  <span>AI Document & Receipt Filter</span>
+                  {excludedCount > 0 && (
+                    <span className="text-[10px] bg-amber-500/25 text-amber-300 px-2 py-0.5 rounded-full font-bold border border-amber-500/30">
+                      {excludedCount} Flagged
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-gray-400">
+                  {excludedCount > 0
+                    ? `${excludedCount} document/receipt hidden from game. Tap to review.`
+                    : 'Manual scan: filters out receipts, bills, and screenshots.'}
+                </div>
+              </div>
             </div>
-          ) : (
-            <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/10 text-xs text-gray-300 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={16} className="shrink-0 text-emerald-400" />
-                <span>Photos ready. AI scan is manual only.</span>
-              </div>
-              <button
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={handleRunAiScan}
                 disabled={isScanning}
-                className="text-[11px] px-2.5 py-1 rounded-lg bg-violet-600/30 hover:bg-violet-600 text-violet-200 hover:text-white transition-colors cursor-pointer font-semibold border border-violet-500/30"
+                className="bg-indigo-600/40 hover:bg-indigo-600 border-indigo-400/40 text-xs py-2 text-indigo-100 font-bold flex-1 sm:flex-initial"
               >
-                {isScanning ? 'Scanning...' : '🛡️ Scan for Documents'}
-              </button>
+                <ShieldCheck size={14} className="text-indigo-300" />
+                <span>{isScanning ? 'Scanning...' : '🛡️ Start AI Document Scan'}</span>
+              </Button>
+              {excludedCount > 0 && (
+                <button
+                  onClick={() => setIsPreviewModalOpen(true)}
+                  className="text-xs text-amber-300 underline hover:text-white px-2 py-1 font-semibold"
+                >
+                  Review
+                </button>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Ready & Upload More Buttons */}
           <div className="flex gap-2 pt-1">
@@ -656,9 +634,9 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               size="sm"
               className="text-xs shrink-0 text-violet-300 border-violet-500/30 hover:border-violet-400"
               onClick={() => setIsCloudModalOpen(true)}
-              title="Import photos from folder or Google Drive links"
+              title="Import photos from folder or Google Drive"
             >
-              <Folder size={14} /> Drive
+              <Folder size={14} /> Drive / Folder
             </Button>
             <Button
               variant={isReady ? 'success' : 'primary'}
@@ -688,7 +666,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         isOpen={isCloudModalOpen}
         onClose={() => setIsCloudModalOpen(false)}
         onImportFiles={handleImportFolderFiles}
-        onImportUrls={handleImportUrls}
       />
     </div>
   )
