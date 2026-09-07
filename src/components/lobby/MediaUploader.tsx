@@ -16,6 +16,7 @@ import { Badge } from '../ui/Badge'
 import { DocumentScanner } from '../ml/DocumentScanner'
 import { ImagePreviewModal } from '../ml/ImagePreviewModal'
 import { useDocumentFilter } from '../../hooks/useDocumentFilter'
+import { isNativeApp, queryNativeCameraRoll } from '../../services/nativeMediaService'
 
 interface MediaUploaderProps {
   onMediaReady: (mediaItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }>) => void
@@ -101,6 +102,23 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   const approvedItems = items.filter((i) => !i.isExcluded)
 
+  const handleCameraRollClick = async () => {
+    if (isNativeApp()) {
+      const nativeMedia = await queryNativeCameraRoll(15)
+      if (nativeMedia.length > 0) {
+        const mapped = nativeMedia.map((m) => ({
+          id: m.id,
+          type: m.type,
+          dataUrl: m.dataUrl,
+        }))
+        onMediaReady(mapped)
+        if (!isReady) onToggleReady()
+        return
+      }
+    }
+    fileInputRef.current?.click()
+  }
+
   return (
     <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl space-y-3">
       <div className="flex items-center justify-between pb-2 border-b border-white/10">
@@ -138,7 +156,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       {items.length === 0 && !isScanning && (
         <div className="space-y-3">
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={handleCameraRollClick}
             className="w-full p-6 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
           >
             <div className="w-14 h-14 rounded-2xl bg-violet-600/40 flex items-center justify-center text-violet-200 border border-violet-400/40 shadow-inner">
