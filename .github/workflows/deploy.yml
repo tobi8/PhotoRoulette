@@ -81,12 +81,15 @@ jobs:
         run: |
           cd android
           ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee ../gradle.log
+          echo "=== Found APK files: ==="
+          find app/build/outputs -name "*.apk" || ls -la app/build/outputs/
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: PhotoRoulette-Android-Debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/**/*.apk
+          if-no-files-found: error
           retention-days: 30
 
       - name: Upload Build Log on Failure
