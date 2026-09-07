@@ -1,5 +1,5 @@
-import React from 'react'
-import { Flame, ArrowUp, ArrowDown } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Flame, Clock } from 'lucide-react'
 import { Player } from '../../types/game'
 import { Avatar } from '../ui/Avatar'
 
@@ -8,6 +8,7 @@ interface LeaderboardRaceProps {
   currentPlayerId?: string
   roundNumber?: number
   totalRounds?: number
+  autoAdvanceSeconds?: number
 }
 
 export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
@@ -15,7 +16,18 @@ export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
   currentPlayerId,
   roundNumber,
   totalRounds,
+  autoAdvanceSeconds = 3,
 }) => {
+  const [secondsLeft, setSecondsLeft] = useState(autoAdvanceSeconds)
+
+  useEffect(() => {
+    setSecondsLeft(autoAdvanceSeconds)
+    const interval = setInterval(() => {
+      setSecondsLeft((prev) => Math.max(0, prev - 1))
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [autoAdvanceSeconds])
+
   // Sort players descending by score
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score)
   const maxScore = Math.max(1, sortedPlayers[0]?.score || 1)
@@ -34,7 +46,10 @@ export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
             </span>
           )}
         </div>
-        <span className="text-xs font-bold text-violet-400">LEADERBOARD</span>
+        <div className="flex items-center gap-1.5 text-xs text-violet-400 font-mono font-bold">
+          <Clock size={13} className="animate-spin" />
+          <span>Next in {secondsLeft}s...</span>
+        </div>
       </div>
 
       {/* Players race bars */}

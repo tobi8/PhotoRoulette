@@ -171,7 +171,7 @@ export function usePeerConnection(
 
   // Host: Create a new room
   const createRoom = useCallback(
-    async (customCode?: string): Promise<string> => {
+    async (customCode?: string): Promise<{ code: string; peerId: string }> => {
       cleanup()
       setIsConnecting(true)
       setError(null)
@@ -199,7 +199,7 @@ export function usePeerConnection(
             setRoomCode(code)
             setIsConnected(true)
             setIsConnecting(false)
-            resolve(code)
+            resolve({ code, peerId: id })
           })
 
           peer.on('connection', (conn) => {
@@ -247,7 +247,7 @@ export function usePeerConnection(
 
   // Client: Join an existing room
   const joinRoom = useCallback(
-    async (codeToJoin: string): Promise<void> => {
+    async (codeToJoin: string): Promise<{ code: string; peerId: string }> => {
       cleanup()
       setIsConnecting(true)
       setError(null)
@@ -285,7 +285,7 @@ export function usePeerConnection(
             conn.on('open', () => {
               setIsConnected(true)
               setIsConnecting(false)
-              resolve()
+              resolve({ code: formattedCode, peerId: id })
             })
 
             conn.on('data', (data) => {

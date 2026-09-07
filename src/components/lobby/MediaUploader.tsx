@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react'
-import { Upload, Sparkles, ShieldCheck, ShieldAlert, Eye, Check, AlertCircle } from 'lucide-react'
+import { Upload, Sparkles, ShieldCheck, ShieldAlert, Eye, Check, Shuffle, Camera } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { DocumentScanner } from '../ml/DocumentScanner'
@@ -19,6 +19,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
+  const [autoSelectedCount, setAutoSelectedCount] = useState<number>(0)
 
   const {
     isScanning,
@@ -33,43 +34,63 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     getApprovedMedia,
   } = useDocumentFilter()
 
+  // Handle camera roll selection: automatically pick random 15-20 items, filter, and mark ready!
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const filesArray = Array.from(e.target.files)
+      let filesArray = Array.from(e.target.files)
+
+      // Automatically sample a random subset of up to 15-20 photos/videos
+      if (filesArray.length > 15) {
+        filesArray = filesArray.sort(() => Math.random() - 0.5).slice(0, 15)
+      }
+
+      setAutoSelectedCount(filesArray.length)
+
       const { accepted } = await processFiles(filesArray)
       onMediaReady(accepted)
+
+      // Automatically mark ready without requiring manual click!
+      if (!isReady && accepted.length > 0) {
+        onToggleReady()
+      }
     }
   }
 
-  const handleDemoLoad = async () => {
+  // 1-Tap Instant Auto-Roll
+  const handleInstantAutoRoll = async () => {
     await loadMockPhotosWithTestDocument()
-    // Give state a tick to update
     setTimeout(() => {
-      onMediaReady(getApprovedMedia())
-    }, 100)
+      const approved = getApprovedMedia()
+      setAutoSelectedCount(approved.length)
+      onMediaReady(approved)
+      if (!isReady) {
+        onToggleReady()
+      }
+    }, 150)
   }
 
   const handleConfirmReview = () => {
     setIsPreviewModalOpen(false)
-    onMediaReady(getApprovedMedia())
+    const approved = getApprovedMedia()
+    onMediaReady(approved)
   }
 
   return (
-    <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl">
-      <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/10">
+    <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl space-y-3">
+      <div className="flex items-center justify-between pb-2 border-b border-white/10">
         <div>
           <h3 className="font-bold text-white text-base flex items-center gap-2">
-            <span>Contribute Photos</span>
+            <span>Camera Roll Roulette</span>
             <span className="text-xl">📸</span>
           </h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            Select 5 to 30 photos for the roulette pool
+            Auto-selects photos & videos • AI filters documents
           </p>
         </div>
 
         {acceptedCount > 0 && (
           <Badge variant="success" size="md">
-            {acceptedCount} In Pool
+            {acceptedCount} Auto-Selected
           </Badge>
         )}
       </div>
@@ -87,59 +108,63 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       {/* Active Scanning Bar */}
       <DocumentScanner progress={progress} isScanning={isScanning} />
 
-      {/* Upload Buttons */}
+      {/* Initial state: Tap to open Camera Roll with automatic selection */}
       {items.length === 0 && !isScanning && (
         <div className="space-y-3">
-          <div
+          <button
             onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-violet-500/40 hover:border-violet-400 bg-violet-950/20 hover:bg-violet-950/30 rounded-2xl p-6 text-center cursor-pointer transition-all duration-150 flex flex-col items-center justify-center gap-2.5"
+            className="w-full p-6 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
           >
-            <div className="p-3 bg-violet-600/30 rounded-full text-violet-300">
-              <Upload size={24} />
+            <div className="w-14 h-14 rounded-2xl bg-violet-600/40 flex items-center justify-center text-violet-200 border border-violet-400/40 shadow-inner">
+              <Camera size={28} className="animate-pulse" />
             </div>
-            <div>
-              <div className="font-bold text-white text-sm">Tap to Select Camera Photos</div>
-              <div className="text-xs text-gray-400 mt-0.5">
-                Local AI filters out receipts, IDs & documents automatically
+            <div className="text-center">
+              <div className="font-black text-white text-base">
+                📱 Auto-Select from Camera Roll
+              </div>
+              <div className="text-xs text-violet-300/80 mt-1 max-w-xs">
+                Tap to grant access — the app will automatically pick 15 random photos & videos from your gallery!
               </div>
             </div>
+          </button>
+
+          <div className="flex items-center gap-2">
+            <div className="h-px bg-white/10 flex-1" />
+            <span className="text-[10px] text-gray-500 font-bold uppercase">OR</span>
+            <div className="h-px bg-white/10 flex-1" />
           </div>
 
-          <div className="text-center">
-            <span className="text-xs text-gray-500 font-medium">OR</span>
-          </div>
-
-          {/* Quick Demo Pack button */}
+          {/* Instant 1-tap auto roll */}
           <Button
             variant="secondary"
             size="md"
             fullWidth
-            onClick={handleDemoLoad}
-            className="border-violet-500/20 text-xs text-violet-200"
+            onClick={handleInstantAutoRoll}
+            className="border-violet-500/30 text-xs text-violet-200 py-3"
           >
-            <Sparkles size={16} className="text-amber-400" />
-            <span>Load Quick Demo Pack (Includes Simulated Receipt)</span>
+            <Shuffle size={16} className="text-amber-400" />
+            <span>⚡ 1-Tap Instant Auto-Roll (Pre-Loaded Camera Roll)</span>
           </Button>
         </div>
       )}
 
-      {/* Uploaded state summary */}
+      {/* Once loaded: Shows summary, auto-ready status, and review option */}
       {items.length > 0 && !isScanning && (
         <div className="space-y-3">
           <div className="bg-white/5 rounded-2xl p-3.5 border border-white/10 flex items-center justify-between">
             <div className="min-w-0">
               <div className="font-bold text-sm text-white flex items-center gap-2">
                 <ShieldCheck size={16} className="text-emerald-400 shrink-0" />
-                <span>{acceptedCount} Photos Approved</span>
+                <span>{acceptedCount} Photos/Videos In Game</span>
               </div>
               {excludedCount > 0 ? (
                 <div className="text-xs text-amber-300 flex items-center gap-1.5 mt-0.5">
                   <ShieldAlert size={14} className="shrink-0" />
-                  <span>{excludedCount} sensitive documents excluded</span>
+                  <span>{excludedCount} receipts/documents automatically dropped</span>
                 </div>
               ) : (
                 <div className="text-xs text-gray-400 mt-0.5">
-                  Privacy filter verified clean
+                  Camera roll automatically shuffled & verified safe
                 </div>
               )}
             </div>
@@ -161,25 +186,22 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               className="flex-1 text-xs"
               onClick={() => fileInputRef.current?.click()}
             >
-              <Upload size={14} /> Add More
+              <Upload size={14} /> Change Photos
             </Button>
             <Button
               variant={isReady ? 'success' : 'primary'}
               size="md"
               className="flex-2"
-              onClick={() => {
-                onMediaReady(getApprovedMedia())
-                onToggleReady()
-              }}
+              onClick={onToggleReady}
             >
               <Check size={16} />
-              {isReady ? "Ready! (Click to cancel)" : "I'm Ready in Lobby"}
+              {isReady ? 'Ready in Lobby (Click to Unready)' : "I'm Ready"}
             </Button>
           </div>
         </div>
       )}
 
-      {/* Review Modal */}
+      {/* Review & Exclusion Modal */}
       <ImagePreviewModal
         isOpen={isPreviewModalOpen}
         onClose={() => setIsPreviewModalOpen(false)}
