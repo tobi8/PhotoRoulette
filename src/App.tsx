@@ -1131,7 +1131,7 @@ export default function App() {
   return (
     <div className="min-h-screen w-full bg-[#0d0b18] text-gray-100 flex flex-col justify-between selection:bg-violet-600 selection:text-white">
       {/* Top Navigation Bar */}
-      <header className="w-full max-w-4xl mx-auto px-4 py-3 flex items-center justify-between z-30">
+      <header className="w-full max-w-4xl mx-auto px-4 pt-6 sm:pt-8 pb-3 flex items-center justify-between z-30 pt-[max(1.5rem,env(safe-area-inset-top))]">
         <div
           onClick={handleLeaveGame}
           className="flex items-center gap-2 cursor-pointer select-none"

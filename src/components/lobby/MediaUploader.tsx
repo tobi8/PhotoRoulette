@@ -615,53 +615,55 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </>
           ) : (
             <div className="space-y-2.5">
-              <button
-                type="button"
-                onClick={handleLaunchShortcut}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer shadow-lg shadow-blue-500/20"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                    <Sparkles size={24} />
-                  </div>
-                  <div>
-                    <div className="font-extrabold text-white text-base">
-                      Get 20 Photos from Shortcut
+              {!isPendingPaste ? (
+                <button
+                  type="button"
+                  onClick={handleLaunchShortcut}
+                  className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer shadow-lg shadow-blue-500/20"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                      <Sparkles size={24} />
                     </div>
-                    <div className="text-xs text-blue-200/90 font-normal mt-0.5">
-                      Picks random photos via iOS Shortcut
+                    <div>
+                      <div className="font-extrabold text-white text-base">
+                        Upload
+                      </div>
+                      <div className="text-xs text-blue-200/90 font-normal mt-0.5">
+                        Picks 20 random photos via Shortcut
+                      </div>
                     </div>
                   </div>
+                  <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
+                    Upload
+                  </span>
+                </button>
+              ) : (
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  onPaste={handleNativePaste}
+                  onClick={handlePasteFromClipboard}
+                  className="w-full p-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 hover:from-indigo-500 hover:to-purple-500 border border-indigo-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer outline-none shadow-lg shadow-indigo-500/20"
+                >
+                  <div className="flex items-center gap-3 pointer-events-none">
+                    <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                      <Clipboard size={24} />
+                    </div>
+                    <div>
+                      <div className="font-extrabold text-white text-base">
+                        Paste
+                      </div>
+                      <div className="text-xs text-indigo-200/90 font-normal mt-0.5">
+                        Tap here to paste from Shortcut
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0 pointer-events-none">
+                    Paste
+                  </span>
                 </div>
-                <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
-                  Get 20
-                </span>
-              </button>
-
-              <div
-                contentEditable
-                suppressContentEditableWarning
-                onPaste={handleNativePaste}
-                onClick={handlePasteFromClipboard}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 hover:from-indigo-500 hover:to-purple-500 border border-indigo-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer outline-none shadow-lg shadow-indigo-500/20"
-              >
-                <div className="flex items-center gap-3 pointer-events-none">
-                  <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                    <Clipboard size={24} />
-                  </div>
-                  <div>
-                    <div className="font-extrabold text-white text-base">
-                      Paste 20 Photos
-                    </div>
-                    <div className="text-xs text-indigo-200/90 font-normal mt-0.5">
-                      Tap here to paste from Shortcut
-                    </div>
-                  </div>
-                </div>
-                <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0 pointer-events-none">
-                  Paste Now
-                </span>
-              </div>
+              )}
 
               <a
                 href={SHORTCUT_INSTALL_URL}
@@ -790,15 +792,16 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                   <Star size={14} className={hasGuaranteed ? "fill-amber-400 text-amber-400" : ""} />
                   <span className="truncate">{hasGuaranteed ? "Change Guaranteed Photo" : "1 Guaranteed Photo"}</span>
                 </Button>
-                <div className="grid grid-cols-2 gap-2">
+                {!isPendingPaste ? (
                   <button
                     type="button"
                     onClick={handleLaunchShortcut}
                     className="w-full p-2.5 rounded-xl border border-indigo-500/30 text-indigo-300 hover:bg-indigo-950/30 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold transition-all"
                   >
                     <Sparkles size={14} />
-                    <span>Get 20 Shortcut</span>
+                    <span>Upload</span>
                   </button>
+                ) : (
                   <div
                     contentEditable
                     suppressContentEditableWarning
@@ -807,9 +810,9 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                     className="w-full p-2.5 rounded-xl border border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold outline-none transition-all"
                   >
                     <Clipboard size={14} className="pointer-events-none" />
-                    <span className="pointer-events-none">Paste Photos</span>
+                    <span className="pointer-events-none">Paste</span>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>
