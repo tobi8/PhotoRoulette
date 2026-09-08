@@ -195,38 +195,40 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       }
     } catch {}
 
-    if (rawCandidates.length === 0) {
-      const objectMatches = trimmed.match(/\{[\s\S]*?\}/g)
-      if (objectMatches) {
-        for (const item of objectMatches) {
-          try {
-            const obj = JSON.parse(item)
-            const val = obj.data || obj.url || obj.base64
-            if (val && typeof val === "string") rawCandidates.push(val)
-          } catch {}
-        }
-      }
-    }
-
     if (rawCandidates.length === 0 && trimmed.includes("data:image")) {
-      const quotedMatches = trimmed.match(/"([^"\\]*(\\.[^"\\]*)*)"/g)
-      if (quotedMatches && quotedMatches.length > 0) {
-        for (const m of quotedMatches) {
-          const unquoted = m.slice(1, -1)
-          if (unquoted.includes("data:image") || unquoted.length > 100) {
-            rawCandidates.push(unquoted)
-          }
+      let searchIdx = 0
+      while (searchIdx < trimmed.length) {
+        const found = trimmed.indexOf("data:image", searchIdx)
+        if (found === -1) break
+        let endIdx = trimmed.indexOf('"', found)
+        const singleQuoteEnd = trimmed.indexOf("'", found)
+        const newlineEnd = trimmed.indexOf("\n", found)
+
+        let candidateEnd = trimmed.length
+        if (endIdx !== -1 && endIdx < candidateEnd) candidateEnd = endIdx
+        if (singleQuoteEnd !== -1 && singleQuoteEnd < candidateEnd) candidateEnd = singleQuoteEnd
+        if (newlineEnd !== -1 && newlineEnd < candidateEnd) candidateEnd = newlineEnd
+
+        const segment = trimmed.substring(found, candidateEnd)
+        if (segment.length > 50) {
+          rawCandidates.push(segment)
         }
+        searchIdx = candidateEnd + 1
       }
     }
 
     if (rawCandidates.length === 0) {
-      const lines = trimmed.split(/[\r\n]+/).map((s) => s.trim()).filter((s) => s.length > 50)
-      rawCandidates.push(...lines)
+      const lines = trimmed.split(/[\r\n]+/)
+      for (const line of lines) {
+        const trimmedLine = line.trim()
+        if (trimmedLine.length > 50) {
+          rawCandidates.push(trimmedLine)
+        }
+      }
     }
 
     const dataUrls = rawCandidates
-      .filter((s) => s.length > 50)
+      .slice(0, 20)
       .map(sanitizeBase64String)
       .filter((s) => s.length > 100)
 
