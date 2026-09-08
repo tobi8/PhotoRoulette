@@ -444,13 +444,10 @@ export default function App() {
   }, [])
 
   const peerConnection = usePeerConnection(handlePeerMessage, handlePeerDisconnected)
-
-  // --------------------------------------------------------------------------
-  // Auto-fill room code from URL hash (e.g. #ROOM12) & auto-restore active session
-  // --------------------------------------------------------------------------
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search)
     const queryRoom = searchParams.get('room')
+    const queryUser = searchParams.get('user')
     const hash = window.location.hash.replace('#', '').trim()
     const targetRoom = queryRoom || hash
 
@@ -461,7 +458,6 @@ export default function App() {
         const savedRaw = sessionStorage.getItem(SESSION_STORAGE_KEY)
         if (savedRaw) {
           const saved: ActiveSession = JSON.parse(savedRaw)
-          // Allow session recovery if room matches and session was within last 2 hours
           if (
             saved &&
             saved.roomCode === formatted &&
@@ -474,7 +470,7 @@ export default function App() {
                 .then(({ peerId }) => {
                   const restoredHost: Player = {
                     ...(saved.player || {}),
-                    id: peerId,
+                    id: queryUser || peerId,
                     isHost: true,
                   }
                   setCurrentPlayer(restoredHost)
@@ -500,7 +496,7 @@ export default function App() {
                 .then(({ peerId }) => {
                   const restoredClient: Player = {
                     ...(saved.player || {}),
-                    id: peerId,
+                    id: queryUser || peerId,
                     isHost: false,
                   }
                   setCurrentPlayer(restoredClient)

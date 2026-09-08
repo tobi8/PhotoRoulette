@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react"
+import React, { useState, useMemo, useRef, useEffect } from "react"
 import {
   Smartphone,
   Clipboard,
@@ -36,19 +36,56 @@ interface MediaUploaderProps {
   userId?: string
 }
 
-const SHORTCUT_URL = "https://www.icloud.com/shortcuts/bb1707211c824566ab3e70263be68c57"
+const SHORTCUT_INSTALL_URL = "https://www.icloud.com/shortcuts/cc52cea3e6534daf9097c564c3bd99f7"
+const SHORTCUT_NAME = "PhotoRouletteUpload"
 
 export const MediaUploader: React.FC<MediaUploaderProps> = ({
   onMediaReady,
   isReady,
   onToggleReady,
   mediaType = "mixed",
+  roomId,
+  userId,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [isPreparing, setIsPreparing] = useState(false)
   const [permissionDenied, setPermissionDenied] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [isPendingPaste, setIsPendingPaste] = useState<boolean>(() => {
+    try {
+      const searchParams = new URLSearchParams(window.location.search)
+      if (searchParams.get("source") === "shortcut") return true
+      return sessionStorage.getItem("pending_paste") === "true"
+    } catch {
+      return false
+    }
+  })
+
+  useEffect(() => {
+    try {
+      const searchParams = new URLSearchParams(window.location.search)
+      if (searchParams.get("source") === "shortcut" || sessionStorage.getItem("pending_paste") === "true") {
+        setIsPendingPaste(true)
+      }
+    } catch {}
+  }, [])
+
+  const handleLaunchShortcut = () => {
+    try {
+      sessionStorage.setItem("pending_paste", "true")
+      setIsPendingPaste(true)
+      const currentOrigin = window.location.origin
+      const currentPath = window.location.pathname
+      const effectiveRoom = roomId || "ROOM"
+      const effectiveUser = userId || "USER"
+      const returnUrl = `${currentOrigin}${currentPath}?room=${encodeURIComponent(effectiveRoom)}&user=${encodeURIComponent(effectiveUser)}&source=shortcut#${encodeURIComponent(effectiveRoom)}`
+      const shortcutUrl = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&input=text&text=${encodeURIComponent(returnUrl)}`
+      window.location.href = shortcutUrl
+    } catch (err) {
+      console.error(err)
+    }
+  }
 
   const isAndroidDevice = useMemo(() => isAndroid(), [])
 
@@ -233,6 +270,10 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       .filter((s) => s.length > 100)
 
     if (dataUrls.length > 0) {
+      try {
+        sessionStorage.removeItem("pending_paste")
+        setIsPendingPaste(false)
+      } catch {}
       const selected = dataUrls.slice(0, 20)
       const mapped = selected.map((url, idx) => ({
         id: `paste_${Date.now()}_${idx}`,
@@ -527,42 +568,69 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 </span>
               </button>
 
-              <div
-                contentEditable
-                suppressContentEditableWarning
-                onPaste={handleNativePaste}
-                onClick={handlePasteFromClipboard}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer outline-none"
-              >
-                <div className="flex items-center gap-3 pointer-events-none">
-                  <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                    <Clipboard size={24} />
-                  </div>
-                  <div>
-                    <div className="font-extrabold text-white text-base">
-                      Paste 20 Photos from Clipboard
+              {isPendingPaste ? (
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  onPaste={handleNativePaste}
+                  onClick={handlePasteFromClipboard}
+                  className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer outline-none shadow-lg shadow-blue-500/20 animate-pulse"
+                >
+                  <div className="flex items-center gap-3 pointer-events-none">
+                    <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                      <Clipboard size={24} />
                     </div>
-                    <div className="text-xs text-blue-200/90 font-normal mt-0.5">
-                      Tap or long-press to Paste
+                    <div>
+                      <div className="font-extrabold text-white text-base">
+                        Paste 20 Photos
+                      </div>
+                      <div className="text-xs text-blue-200/90 font-normal mt-0.5">
+                        Tap here to paste from Shortcut
+                      </div>
                     </div>
                   </div>
+                  <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0 pointer-events-none">
+                    Paste Now
+                  </span>
                 </div>
-                <span className="text-xs bg-white/20 text-white px-3 py-1.5 rounded-full font-bold shrink-0 pointer-events-none">
-                  Paste
-                </span>
-              </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleLaunchShortcut}
+                    className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                        <Sparkles size={24} />
+                      </div>
+                      <div>
+                        <div className="font-extrabold text-white text-base">
+                          Get 20 Photos from Shortcut
+                        </div>
+                        <div className="text-xs text-blue-200/90 font-normal mt-0.5">
+                          Picks random photos via iOS Shortcut
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
+                      Get 20
+                    </span>
+                  </button>
 
-              <a
-                href={SHORTCUT_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full p-3.5 rounded-2xl bg-violet-950/50 hover:bg-violet-900/60 border border-violet-500/30 text-violet-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98"
-              >
-                <span className="text-sm font-bold text-white">Install iOS Shortcut</span>
-                <span className="text-xs bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
-                  Install <ExternalLink size={12} />
-                </span>
-              </a>
+                  <a
+                    href={SHORTCUT_INSTALL_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full p-3.5 rounded-2xl bg-violet-950/50 hover:bg-violet-900/60 border border-violet-500/30 text-violet-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98"
+                  >
+                    <span className="text-sm font-bold text-white">Install Shortcut (First Time Only)</span>
+                    <span className="text-xs bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
+                      Install <ExternalLink size={12} />
+                    </span>
+                  </a>
+                </>
+              )}
             </div>
           )}
         </div>
