@@ -3,6 +3,7 @@ package com.photoroulette.app;
 import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentUris;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -322,6 +323,7 @@ public class NativeGalleryPlugin extends Plugin {
             try {
                 String roomId = call.getString("room", "ROOM");
                 String userId = call.getString("userId", "user");
+                String uploadUrl = call.getString("uploadUrl", "");
                 String types = call.getString("types", "all");
                 List<MediaRef> allRefs = queryAllMediaReferences(types);
                 int count = Math.min(20, allRefs.size());
