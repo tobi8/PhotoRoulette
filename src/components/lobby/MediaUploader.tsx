@@ -11,6 +11,7 @@ import {
   PlayCircle,
   ExternalLink,
   RefreshCw,
+  Image as ImageIcon,
 } from "lucide-react"
 import { Button } from "../ui/Button"
 import { Badge } from "../ui/Badge"
@@ -111,13 +112,32 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   }
 
   const handleNativePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (items && items.length > 0) {
+      const extractedFiles: File[] = []
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (item.kind === "file") {
+          const f = item.getAsFile()
+          if (f && (f.type.startsWith("image/") || f.type.startsWith("video/"))) {
+            extractedFiles.push(f)
+          }
+        }
+      }
+      if (extractedFiles.length > 0) {
+        e.preventDefault()
+        await processAndLoadFiles(extractedFiles)
+        return
+      }
+    }
+
     const clipboardFiles = e.clipboardData?.files
     if (clipboardFiles && clipboardFiles.length > 0) {
-      e.preventDefault()
       const validFiles = Array.from(clipboardFiles).filter(
         (f) => f.type.startsWith("image/") || f.type.startsWith("video/")
       )
       if (validFiles.length > 0) {
+        e.preventDefault()
         await processAndLoadFiles(validFiles)
         return
       }
@@ -421,7 +441,30 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               </button>
             </>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                    <ImageIcon size={24} />
+                  </div>
+                  <div>
+                    <div className="font-extrabold text-white text-base">
+                      Select Photos from Device
+                    </div>
+                    <div className="text-xs text-emerald-200/90 font-normal mt-0.5">
+                      Choose from Photo Library
+                    </div>
+                  </div>
+                </div>
+                <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
+                  Select
+                </span>
+              </button>
+
               <div
                 contentEditable
                 suppressContentEditableWarning
@@ -528,15 +571,26 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 <RefreshCw size={14} /> Reroll
               </Button>
             ) : (
-              <div
-                contentEditable
-                suppressContentEditableWarning
-                onPaste={handleNativePaste}
-                onClick={handlePasteFromClipboard}
-                className="w-full p-2.5 rounded-xl border border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs flex items-center justify-center gap-2 cursor-pointer font-bold outline-none"
-              >
-                <Clipboard size={14} className="pointer-events-none" />
-                <span className="pointer-events-none">Paste New</span>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-950/30 text-xs py-2"
+                >
+                  <ImageIcon size={14} /> Select Different
+                </Button>
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  onPaste={handleNativePaste}
+                  onClick={handlePasteFromClipboard}
+                  className="w-full p-2.5 rounded-xl border border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs flex items-center justify-center gap-2 cursor-pointer font-bold outline-none"
+                >
+                  <Clipboard size={14} className="pointer-events-none" />
+                  <span className="pointer-events-none">Paste New</span>
+                </div>
               </div>
             )}
           </div>
