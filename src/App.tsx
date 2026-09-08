@@ -53,7 +53,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   roundDuration: 5,
   totalRounds: 10,
   mediaType: 'mixed',
-  progressiveBlur: true,
+  progressiveBlur: false,
   tvMode: false,
 }
 

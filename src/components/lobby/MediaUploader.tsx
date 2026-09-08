@@ -23,7 +23,6 @@ import { Badge } from '../ui/Badge'
 import { DocumentScanner } from '../ml/DocumentScanner'
 import { ImagePreviewModal } from '../ml/ImagePreviewModal'
 import { useDocumentFilter } from '../../hooks/useDocumentFilter'
-import { isNativeApp, queryNativeCameraRoll } from '../../services/nativeMediaService'
 import {
   getVaultCount,
   savePhotosToVault,
@@ -324,20 +323,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     return list
   }, [items, mediaType])
 
-  const handleCameraRollClick = async () => {
-    if (isNativeApp()) {
-      const nativeMedia = await queryNativeCameraRoll(15)
-      if (nativeMedia.length > 0) {
-        const mapped = nativeMedia.map((m) => ({
-          id: m.id,
-          type: m.type,
-          dataUrl: m.dataUrl,
-        }))
-        onMediaReady(mapped)
-        if (!isReady) onToggleReady()
-        return
-      }
-    }
+  const handleCameraRollClick = () => {
     fileInputRef.current?.click()
   }
 

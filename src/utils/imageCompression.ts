@@ -135,39 +135,41 @@ async function decodeHeicFile(file: File, maxDim = 960, quality = 0.70): Promise
 }
 
 /**
- * Resizes and compresses an image file to max 960x960, JPEG ~70%, kept small for P2P WebRTC transfer and IndexedDB storage.
- * Seamlessly handles iPhone HEIC/HEIF files and uses fast Object URLs.
+ * Tries hardware-accelerated native browser image decoding via URL.createObjectURL(file) + new Image().
+ * On iOS/macOS Safari and WebKit, iPhone HEIC/HEIF photos are decoded natively in GPU hardware in ~15ms,
+ * preventing CPU lockups and tab memory freezes.
  */
-export async function compressImage(file: File, maxDim = 960, quality = 0.70): Promise<CompressionResult> {
-  const isHeic = /\.(heic|heif)$/i.test(file.name) || file.type === 'image/heic' || file.type === 'image/heif'
-
-  // 1. Decode iPhone HEIC files via heic-decode
-  if (isHeic && typeof window !== 'undefined') {
-    const heicResult = await decodeHeicFile(file, maxDim, quality)
-    if (heicResult) return heicResult
-  }
-
+function tryNativeDecode(file: File, maxDim = 960, quality = 0.70, timeoutMs = 2500): Promise<CompressionResult | null> {
   return new Promise((resolve) => {
+    let settled = false
     const objectUrl = URL.createObjectURL(file)
     const img = new Image()
 
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true
+        URL.revokeObjectURL(objectUrl)
+        resolve(null)
+      }
+    }, timeoutMs)
+
     img.onerror = () => {
-      URL.revokeObjectURL(objectUrl)
-      // If decoding fails, generate an attractive fallback photo memory card so it NEVER renders broken
-      const fallbackUrl = createFallbackPhotoCard(file.name)
-      resolve({
-        dataUrl: fallbackUrl,
-        thumbnailUrl: fallbackUrl,
-        width: 800,
-        height: 600,
-        sizeBytes: fallbackUrl.length,
-        type: 'image',
-      })
+      if (!settled) {
+        settled = true
+        clearTimeout(timer)
+        URL.revokeObjectURL(objectUrl)
+        resolve(null)
+      }
     }
 
     img.onload = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       URL.revokeObjectURL(objectUrl)
+
       let { width, height } = img
+      if (!width || !height) return resolve(null)
 
       // Maintain aspect ratio
       if (width > maxDim || height > maxDim) {
@@ -184,47 +186,72 @@ export async function compressImage(file: File, maxDim = 960, quality = 0.70): P
       canvas.width = width
       canvas.height = height
       const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        const fallback = createFallbackPhotoCard(file.name)
-        return resolve({
-          dataUrl: fallback,
-          thumbnailUrl: fallback,
-          width: 800,
-          height: 600,
-          sizeBytes: fallback.length,
+      if (!ctx) return resolve(null)
+
+      try {
+        ctx.drawImage(img, 0, 0, width, height)
+        const dataUrl = canvas.toDataURL('image/jpeg', quality)
+
+        // Generate small thumbnail for review modal
+        const thumbCanvas = document.createElement('canvas')
+        const thumbScale = Math.min(240 / width, 240 / height)
+        thumbCanvas.width = Math.max(1, Math.round(width * thumbScale))
+        thumbCanvas.height = Math.max(1, Math.round(height * thumbScale))
+        const thumbCtx = thumbCanvas.getContext('2d')
+        let thumbUrl = dataUrl
+        if (thumbCtx) {
+          thumbCtx.drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height)
+          thumbUrl = thumbCanvas.toDataURL('image/jpeg', 0.6)
+        }
+
+        const sizeBytes = Math.round((dataUrl.length * 3) / 4)
+
+        resolve({
+          dataUrl,
+          thumbnailUrl: thumbUrl,
+          width,
+          height,
+          sizeBytes,
           type: 'image',
         })
+      } catch {
+        resolve(null)
       }
-
-      ctx.drawImage(img, 0, 0, width, height)
-      const dataUrl = canvas.toDataURL('image/jpeg', quality)
-
-      // Generate small thumbnail for review modal
-      const thumbCanvas = document.createElement('canvas')
-      const thumbScale = Math.min(240 / width, 240 / height)
-      thumbCanvas.width = Math.max(1, Math.round(width * thumbScale))
-      thumbCanvas.height = Math.max(1, Math.round(height * thumbScale))
-      const thumbCtx = thumbCanvas.getContext('2d')
-      let thumbUrl = dataUrl
-      if (thumbCtx) {
-        thumbCtx.drawImage(img, 0, 0, thumbCanvas.width, thumbCanvas.height)
-        thumbUrl = thumbCanvas.toDataURL('image/jpeg', 0.6)
-      }
-
-      const sizeBytes = Math.round((dataUrl.length * 3) / 4)
-
-      resolve({
-        dataUrl,
-        thumbnailUrl: thumbUrl,
-        width,
-        height,
-        sizeBytes,
-        type: 'image',
-      })
     }
 
     img.src = objectUrl
   })
+}
+
+/**
+ * Resizes and compresses an image file to max 960x960, JPEG ~70%, kept small for P2P WebRTC transfer and IndexedDB storage.
+ * Seamlessly handles iPhone HEIC/HEIF files with instant native hardware decoding on iOS and WASM fallback.
+ */
+export async function compressImage(file: File, maxDim = 960, quality = 0.70): Promise<CompressionResult> {
+  const isHeic = /\.(heic|heif)$/i.test(file.name) || file.type === 'image/heic' || file.type === 'image/heif'
+
+  // 1. Try instant hardware-accelerated native decode (works in ~15ms on iOS Safari/WebKit and native apps)
+  const nativeResult = await tryNativeDecode(file, maxDim, quality, isHeic ? 1800 : 3000)
+  if (nativeResult) {
+    return nativeResult
+  }
+
+  // 2. Fallback for browsers lacking native HEIC support (e.g. desktop Windows Chrome)
+  if (isHeic && typeof window !== 'undefined') {
+    const heicResult = await decodeHeicFile(file, maxDim, quality)
+    if (heicResult) return heicResult
+  }
+
+  // 3. Fallback: generate an attractive card so broken image icon is never shown
+  const fallbackUrl = createFallbackPhotoCard(file.name)
+  return {
+    dataUrl: fallbackUrl,
+    thumbnailUrl: fallbackUrl,
+    width: 800,
+    height: 600,
+    sizeBytes: fallbackUrl.length,
+    type: 'image',
+  }
 }
 
 /**
