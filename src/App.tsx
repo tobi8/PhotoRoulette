@@ -1183,12 +1183,13 @@ export default function App() {
 
               {/* Right Column: Player List & Media Uploader */}
               <div className="md:col-span-7 space-y-4">
-                {/* Photo Contribution Section (Auto-Selects & Auto-Readies) */}
                 <MediaUploader
                   onMediaReady={handleMediaContribute}
                   isReady={isReady}
                   onToggleReady={handleToggleReady}
                   mediaType={settings.mediaType}
+                  roomId={peerConnection.roomCode || 'ROOM'}
+                  userId={currentPlayer?.id || peerConnection.peerId}
                 />
 
                 {/* Player List */}

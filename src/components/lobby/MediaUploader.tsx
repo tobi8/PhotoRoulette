@@ -6,17 +6,16 @@ import {
   Eye,
   EyeOff,
   Check,
-  Shuffle,
   Camera,
   RotateCw,
   X,
   PlayCircle,
-  Database,
-  Lock,
   Trash2,
   Sparkles,
   Plus,
   Film,
+  Smartphone,
+  Send,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
@@ -31,6 +30,12 @@ import {
   clearVault,
   fisherYatesShuffle,
 } from '../../services/photoVaultService'
+import {
+  isAndroid,
+  isIOS,
+  hasAndroidBridge,
+  pickRandom20Android,
+} from '../../services/nativeMediaService'
 import { createFallbackPhotoCard } from '../../utils/imageCompression'
 import { getMockPartyPhotos, getMockPartyVideos, getMockPartyDeck } from '../../utils/mockData'
 
@@ -39,6 +44,9 @@ interface MediaUploaderProps {
   isReady: boolean
   onToggleReady: () => void
   mediaType?: 'photos_only' | 'videos_only' | 'mixed'
+  roomId?: string
+  userId?: string
+  workerUrl?: string
 }
 
 export const MediaUploader: React.FC<MediaUploaderProps> = ({
@@ -46,6 +54,9 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   isReady,
   onToggleReady,
   mediaType = 'mixed',
+  roomId = 'DEFAULT_ROOM',
+  userId = 'anonymous',
+  workerUrl = 'https://photoroulette-worker.workers.dev',
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
@@ -53,6 +64,11 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const [isSecretMode, setIsSecretMode] = useState<boolean>(false)
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
   const [isPreparing, setIsPreparing] = useState<boolean>(false)
+  const [isShortcutModalOpen, setIsShortcutModalOpen] = useState<boolean>(false)
+  const [isWaitingForShortcut, setIsWaitingForShortcut] = useState<boolean>(false)
+
+  const isAndroidPlatform = useMemo(() => isAndroid() || hasAndroidBridge(), [])
+  const isIOSPlatform = useMemo(() => isIOS(), [])
 
   const {
     isScanning,
@@ -69,8 +85,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     getApprovedMedia,
   } = useDocumentFilter()
 
-
-  // Check saved vault status on mount and whenever mediaType changes
   useEffect(() => {
     refreshVaultCount()
   }, [mediaType])
@@ -80,7 +94,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     setVaultCount(count)
   }
 
-  // Align active deck when mediaType setting changes (Photos Only, Videos Only, Mixed)
   useEffect(() => {
     if (items.length > 0) {
       if (mediaType === 'videos_only') {
@@ -116,7 +129,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           })
         }
       } else {
-        // 'mixed' mode: Ensure BOTH photos and videos are present in active deck
         const hasVideos = items.some((i) => !i.isExcluded && i.type === 'video')
         const hasPhotos = items.some((i) => !i.isExcluded && i.type === 'image')
         if (!hasVideos || !hasPhotos) {
@@ -138,30 +150,18 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }, [mediaType])
 
-  // Handle camera roll selection: supports unlimited photos/videos at once, saves to IndexedDB Vault, and samples 15
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       let filesArray = Array.from(e.target.files)
-      // Reset input value so user can select again without needing to reload
       e.target.value = ''
-
-      // Show loading indicator immediately while preparing files
       setIsPreparing(true)
-
-      // Randomly shuffle all incoming files first using Fisher-Yates
       filesArray = fisherYatesShuffle(filesArray)
 
-      // Small delay to let the UI render the loading indicator
       await new Promise((resolve) => setTimeout(resolve, 50))
-
-      // Process and filter files (downscaling + document heuristics + safety filter)
-      // Always use turbo mode for fastest possible processing
       const { accepted } = await processFiles(filesArray, { turbo: true })
-
       setIsPreparing(false)
 
       if (accepted.length > 0) {
-        // Automatically save all clean accepted media into device's persistent IndexedDB vault
         await savePhotosToVault(
           accepted.map((m) => ({
             id: m.id,
@@ -171,7 +171,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         )
         await refreshVaultCount()
 
-        // Sample 15 matching mediaType for the current active game
         const activeSample = await sampleRandomFromVault(15, mediaType)
         const filteredAccepted = accepted.filter((m) =>
           mediaType === 'videos_only' ? m.type === 'video' : mediaType === 'photos_only' ? m.type === 'image' : true
@@ -188,7 +187,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         }))
         onMediaReady(mapped)
 
-        // Automatically mark ready
         if (!isReady) {
           onToggleReady()
         }
@@ -200,7 +198,88 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
-  // 1-Tap Mystery Roll from persistent IndexedDB Vault
+  const handleAndroidNativePick20 = async () => {
+    setIsPreparing(true)
+    setVaultMessage('⚡ Querying 20 random photos/videos from Android MediaStore...')
+    try {
+      const assets = await pickRandom20Android(roomId, userId, `${workerUrl}/upload`)
+      if (assets.length > 0) {
+        await savePhotosToVault(assets.map((a) => ({ id: a.id, type: a.type, dataUrl: a.dataUrl })))
+        await refreshVaultCount()
+        loadExistingMedia(assets)
+        onMediaReady(assets)
+        if (!isReady) {
+          onToggleReady()
+        }
+        setVaultMessage(`🎉 20 items picked and prepared automatically!`)
+      } else {
+        setVaultMessage('No media returned or gallery permission required.')
+      }
+    } catch {
+      setVaultMessage('Failed to access Android MediaStore.')
+    } finally {
+      setIsPreparing(false)
+      setTimeout(() => setVaultMessage(null), 4500)
+    }
+  }
+
+  const startPollingWorkerForMedia = () => {
+    setIsWaitingForShortcut(true)
+    let attempts = 0
+    const maxAttempts = 45
+
+    const interval = setInterval(async () => {
+      attempts++
+      try {
+        const response = await fetch(`${workerUrl}/media?room=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.items && data.items.length > 0) {
+            clearInterval(interval)
+            setIsWaitingForShortcut(false)
+            setIsShortcutModalOpen(false)
+
+            const mapped = data.items.map((i: { id: string; type: 'image' | 'video'; url: string }) => ({
+              id: i.id,
+              type: i.type,
+              dataUrl: i.url,
+            }))
+
+            await savePhotosToVault(mapped)
+            await refreshVaultCount()
+            loadExistingMedia(mapped)
+            onMediaReady(mapped)
+
+            if (!isReady) {
+              onToggleReady()
+            }
+
+            setVaultMessage(`🎉 ${mapped.length} items imported successfully via iOS Shortcut!`)
+            setTimeout(() => setVaultMessage(null), 4500)
+            return
+          }
+        }
+      } catch {}
+
+      if (attempts >= maxAttempts) {
+        clearInterval(interval)
+        setIsWaitingForShortcut(false)
+      }
+    }, 2000)
+  }
+
+  const handleIOSShortcutTrigger = () => {
+    const payload = encodeURIComponent(
+      JSON.stringify({
+        room: roomId,
+        userId: userId,
+        endpoint: `${workerUrl}/upload`,
+      })
+    )
+    window.location.href = `shortcuts://run-shortcut?name=PhotoRouletteUpload&input=text&text=${payload}`
+    startPollingWorkerForMedia()
+  }
+
   const handleRollFromVault = async () => {
     const sampled = await sampleRandomFromVault(15, mediaType)
     if (sampled.length > 0) {
@@ -220,13 +299,12 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       setVaultMessage(`🎲 Rolled ${sampled.length} Mystery ${label} from your saved vault!`)
       setTimeout(() => setVaultMessage(null), 3000)
     } else {
-      // If vault doesn't have media matching this type, load built-in party pack!
       if (mediaType === 'videos_only') {
         const mockVids = getMockPartyVideos()
         loadExistingMedia(mockVids)
         onMediaReady(mockVids.map((v) => ({ id: v.id, ownerId: '', ownerName: '', type: v.type, dataUrl: v.dataUrl })))
         if (!isReady) onToggleReady()
-        setVaultMessage(`🎬 Rolled Party Videos! (Upload your own videos anytime)`)
+        setVaultMessage(`🎬 Rolled Party Videos!`)
         setTimeout(() => setVaultMessage(null), 3500)
       } else if (mediaType === 'mixed') {
         const mockMixed = getMockPartyDeck('mixed')
@@ -244,7 +322,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
-  // Clear local device vault
   const handleClearVault = async () => {
     if (window.confirm('Delete all saved photos & videos from this device? You can upload a new batch anytime.')) {
       await clearVault()
@@ -254,8 +331,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
-
-  // Reroll photos in roulette pool
   const handleReroll = async () => {
     const freshSample = await sampleRandomFromVault(15, mediaType)
     if (freshSample.length > 0) {
@@ -280,7 +355,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     e.stopPropagation()
     removePhoto(id)
 
-    // If there are more items in the vault, immediately draw a replacement
     if (vaultCount > items.length) {
       const allMedia = await getAllVaultPhotos()
       const currentIds = new Set(items.map((i) => i.id))
@@ -322,10 +396,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     return list
   }, [items, mediaType])
 
-  const handleCameraRollClick = () => {
-    fileInputRef.current?.click()
-  }
-
   return (
     <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl space-y-3">
       <div className="flex items-center justify-between pb-2 border-b border-white/10">
@@ -359,7 +429,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         )}
       </div>
 
-      {/* Hidden native input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -375,7 +444,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         onChange={handleFileChange}
       />
 
-      {/* Preparing files indicator (shown immediately after file picker closes, before scan starts) */}
       {isPreparing && !isScanning && (
         <div className="w-full bg-[#1e1b38] border border-violet-500/30 rounded-2xl p-4 shadow-xl animate-in fade-in duration-200">
           <div className="flex items-center gap-3">
@@ -383,14 +451,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               <RotateCw size={18} className="text-violet-400 animate-spin" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Preparing your photos...</div>
-              <div className="text-xs text-gray-400">Loading selected files, this may take a moment</div>
+              <div className="text-sm font-bold text-white">Preparing your media...</div>
+              <div className="text-xs text-gray-400">Loading and randomizing items...</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Temporary vault notification */}
       {vaultMessage && (
         <div className="p-2.5 rounded-xl bg-violet-950/80 border border-violet-500/50 text-xs text-violet-200 flex items-center gap-2 animate-in fade-in duration-300">
           <Sparkles size={16} className="text-amber-400 shrink-0" />
@@ -398,13 +465,10 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         </div>
       )}
 
-      {/* Active Scanning Bar */}
       <DocumentScanner progress={progress} isScanning={isScanning} />
 
-      {/* Initial state: No deck loaded yet */}
       {items.length === 0 && !isScanning && (
         <div className="space-y-3">
-          {/* PERSISTENT VAULT CARD: If user previously saved photos */}
           {vaultCount > 0 ? (
             <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-teal-950/50 to-slate-900/60 border border-emerald-500/40 shadow-xl space-y-3">
               <div className="flex items-center justify-between">
@@ -440,7 +504,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 </button>
               </div>
 
-              {/* 1-Tap Mystery Roll Button */}
               <Button
                 variant="primary"
                 size="lg"
@@ -458,6 +521,30 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 </span>
               </Button>
 
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                {isAndroidPlatform && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    fullWidth
+                    onClick={handleAndroidNativePick20}
+                    className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-950/30 text-xs py-2"
+                  >
+                    <Smartphone size={14} /> ⚡ Android Pick 20
+                  </Button>
+                )}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => setIsShortcutModalOpen(true)}
+                  className="border-teal-500/30 text-teal-300 hover:bg-teal-950/30 text-xs py-2"
+                >
+                  <Send size={14} /> 📲 iOS Shortcut
+                </Button>
+              </div>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -465,42 +552,79 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 onClick={() => fileInputRef.current?.click()}
                 className="border-white/10 text-xs py-2 text-gray-300 hover:text-white"
               >
-                <Plus size={14} /> {mediaType === 'videos_only' ? '+ Add More Videos from Photo App' : mediaType === 'photos_only' ? '+ Add More Photos from Photo App' : '+ Add More Media from Photo App'}
+                <Plus size={14} /> Add More Files Manually
               </Button>
             </div>
           ) : (
-            /* First Time Setup: Upload Photos/Videos into Vault */
-            <button
-              onClick={handleCameraRollClick}
-              className="w-full p-6 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-violet-600/40 flex items-center justify-center text-violet-200 border border-violet-400/40 shadow-inner">
-                {mediaType === 'videos_only' ? <Film size={28} className="animate-pulse" /> : <Camera size={28} className="animate-pulse" />}
-              </div>
-              <div className="text-center">
-                <div className="font-black text-white text-base">
-                  {mediaType === 'videos_only'
-                    ? '🎥 Select Videos from Photo App (No Limit)'
-                    : mediaType === 'photos_only'
-                    ? '📱 Select Photos from Photo App (No Limit)'
-                    : '✨ Select Photos & Videos from Photo App (No Limit)'}
-                </div>
-                <div className="text-xs text-violet-300/80 mt-1 max-w-xs">
-                  {mediaType === 'videos_only'
-                    ? "Select videos from your photo library. Stored locally in your device's Video Vault for instant 1-tap play!"
-                    : "Select photos from your photo library. Stored locally in your browser's Photo Vault for instant 1-tap play forever!"}
-                </div>
-              </div>
-            </button>
-          )}
+            <div className="space-y-2.5">
+              {isAndroidPlatform && (
+                <button
+                  onClick={handleAndroidNativePick20}
+                  className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-900/50 via-teal-900/40 to-cyan-900/50 hover:from-emerald-900/70 hover:to-cyan-900/70 border border-emerald-400/40 transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-emerald-950/40 active:scale-98"
+                >
+                  <div className="flex items-center gap-3 text-left">
+                    <div className="w-12 h-12 rounded-xl bg-emerald-600/30 border border-emerald-400/40 flex items-center justify-center text-emerald-300 shrink-0">
+                      <Smartphone size={24} />
+                    </div>
+                    <div>
+                      <div className="font-black text-white text-sm">⚡ Pick Random 20 (Android Native)</div>
+                      <div className="text-xs text-emerald-300/80">Silent 1-tap random selection without picker dialog</div>
+                    </div>
+                  </div>
+                  <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-full font-bold border border-emerald-500/30">
+                    1-Tap
+                  </span>
+                </button>
+              )}
 
+              <button
+                onClick={() => setIsShortcutModalOpen(true)}
+                className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-900/40 via-indigo-900/30 to-violet-900/40 hover:from-blue-900/60 hover:to-violet-900/60 border border-blue-400/40 transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-blue-950/40 active:scale-98"
+              >
+                <div className="flex items-center gap-3 text-left">
+                  <div className="w-12 h-12 rounded-xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-300 shrink-0">
+                    <Send size={24} />
+                  </div>
+                  <div>
+                    <div className="font-black text-white text-sm">📲 Import 20 via iOS Shortcut</div>
+                    <div className="text-xs text-blue-300/80">Auto-filter 20 random items on iPhone/iPad</div>
+                  </div>
+                </div>
+                <span className="text-xs bg-blue-500/20 text-blue-300 px-2.5 py-1 rounded-full font-bold border border-blue-500/30">
+                  iOS
+                </span>
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full p-4 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
+              >
+                <div className="flex items-center gap-3 text-left">
+                  <div className="w-12 h-12 rounded-xl bg-violet-600/40 flex items-center justify-center text-violet-200 border border-violet-400/40 shrink-0">
+                    {mediaType === 'videos_only' ? <Film size={24} /> : <Camera size={24} />}
+                  </div>
+                  <div>
+                    <div className="font-black text-white text-sm">
+                      {mediaType === 'videos_only'
+                        ? 'Select Videos Manually'
+                        : mediaType === 'photos_only'
+                        ? 'Select Photos Manually'
+                        : 'Select Photos & Videos Manually'}
+                    </div>
+                    <div className="text-xs text-violet-300/80">Choose items directly from your photo library</div>
+                  </div>
+                </div>
+                <span className="text-xs bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold border border-violet-500/30">
+                  Manual
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Once loaded: Shows SECRET MYSTERY DECK preview, auto-ready status, and review option */}
       {items.length > 0 && !isScanning && (
         <div className="space-y-3">
-          {/* Deck Preview Carousel with Clear Visual Previews Beforehand */}
           <div>
             <div className="flex items-center justify-between text-xs text-gray-300 font-bold mb-1.5 px-1">
               <div className="flex items-center gap-1.5">
@@ -537,7 +661,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               </button>
             </div>
 
-            {/* Horizontal thumbnail scroller */}
             <div className="flex gap-2 overflow-x-auto pb-2 pt-1 scrollbar-thin">
               {approvedItems.map((item, idx) => (
                 <div
@@ -559,7 +682,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                     }`}
                   />
 
-                  {/* Secret Mode Mystery Overlay */}
                   {isSecretMode && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-violet-950/40 text-violet-200 font-black text-xs pointer-events-none">
                       <span className="text-sm">🎲</span>
@@ -573,21 +695,18 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                     </div>
                   )}
 
-                  {/* Single Photo Veto / Remove button */}
                   <button
                     onClick={(e) => handleRemoveSingle(item.id, e)}
                     className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/80 hover:bg-red-600 text-white flex items-center justify-center text-xs transition-colors cursor-pointer shadow-md"
-                    title="Veto item (swap with another)"
+                    title="Veto item"
                   >
                     <X size={12} />
                   </button>
                 </div>
               ))}
             </div>
-
           </div>
 
-          {/* Reroll & Review Buttons */}
           <div className="flex gap-2">
             <Button
               variant="secondary"
@@ -596,13 +715,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               onClick={() => setIsPreviewModalOpen(true)}
             >
               <Eye size={15} className="text-violet-400" />
-              <span>
-                {mediaType === 'videos_only'
-                  ? `🔍 Inspect Videos (${approvedItems.length})`
-                  : mediaType === 'photos_only'
-                  ? `🔍 Inspect Photos (${approvedItems.length})`
-                  : `🔍 Inspect Media (${approvedItems.length})`}
-              </span>
+              <span>Inspect ({approvedItems.length})</span>
             </Button>
 
             <Button
@@ -612,34 +725,32 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               onClick={handleReroll}
             >
               <RotateCw size={14} className="text-amber-400" />
-              <span>🎲 Reroll 15 Photos</span>
+              <span>Reroll Deck</span>
             </Button>
           </div>
 
-          {/* Privacy summary - Automatic AI document filtering */}
           {excludedCount > 0 ? (
             <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <ShieldAlert size={16} className="shrink-0" />
                 <span>
-                  {excludedCount} document{excludedCount > 1 ? 's' : ''}/receipt{excludedCount > 1 ? 's' : ''} automatically filtered out.
+                  {excludedCount} document{excludedCount > 1 ? 's' : ''}/receipt{excludedCount > 1 ? 's' : ''} filtered.
                 </span>
               </div>
               <button
                 onClick={() => setIsPreviewModalOpen(true)}
                 className="text-[11px] underline font-bold hover:text-white shrink-0 cursor-pointer"
               >
-                Review & Restore
+                Review
               </button>
             </div>
           ) : (
             <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/10 text-xs text-gray-300 flex items-center gap-2">
               <ShieldCheck size={16} className="shrink-0 text-emerald-400" />
-              <span>All photos verified safe. Documents & receipts automatically filtered out.</span>
+              <span>Safe media verified. Documents & receipts automatically filtered out.</span>
             </div>
           )}
 
-          {/* Ready & Upload More Buttons */}
           <div className="flex gap-2 pt-1">
             <Button
               variant="outline"
@@ -663,7 +774,56 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         </div>
       )}
 
-      {/* Review & Exclusion Modal */}
+      {isShortcutModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#1b1730] border border-violet-500/40 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white font-bold text-base">
+                <Send size={18} className="text-blue-400" />
+                <span>iOS Shortcut Integration</span>
+              </div>
+              <button
+                onClick={() => setIsShortcutModalOpen(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-gray-300">
+              <p>
+                Run the official Apple Shortcut to randomly pick 20 media items, optimize photos to 1200px, encode videos to 720p, and submit directly to this room.
+              </p>
+              <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1 font-mono text-[11px] text-gray-400">
+                <div>Room: <span className="text-violet-300 font-bold">{roomId}</span></div>
+                <div>User ID: <span className="text-emerald-300 font-bold">{userId}</span></div>
+                <div>Endpoint: <span className="text-cyan-300 truncate block">{workerUrl}/upload</span></div>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                onClick={handleIOSShortcutTrigger}
+                className="bg-blue-600 hover:bg-blue-500 text-sm py-3 font-bold"
+              >
+                <Send size={16} />
+                <span>Open in Apple Shortcuts</span>
+              </Button>
+
+              {isWaitingForShortcut && (
+                <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-500/30 flex items-center gap-2 text-xs text-blue-200 animate-pulse">
+                  <RotateCw size={14} className="animate-spin text-blue-400" />
+                  <span>Waiting for Shortcut to upload media...</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <ImagePreviewModal
         isOpen={isPreviewModalOpen}
         onClose={() => setIsPreviewModalOpen(false)}
@@ -672,7 +832,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         onRemovePhoto={removePhoto}
         onConfirm={handleConfirmReview}
       />
-
     </div>
   )
 }

@@ -17,23 +17,77 @@ interface NativeGalleryPlugin {
       data: string
     }>
   }>
+  pickRandom20(options?: {
+    room?: string
+    userId?: string
+    uploadUrl?: string
+  }): Promise<{
+    medias?: Array<{
+      identifier: string
+      type: 'image' | 'video'
+      data: string
+    }>
+    success?: boolean
+    response?: string
+  }>
 }
 
 const AndroidGallery = registerPlugin<NativeGalleryPlugin>('NativeGallery')
 
-/**
- * Checks if the app is currently running as an installed native iOS or Android app
- */
+declare global {
+  interface Window {
+    AndroidBridge?: {
+      pickRandom20: (roomId: string, userId: string, uploadUrl: string) => void
+    }
+    onNativeMediaEvent?: (payload: { type: string; status: string; progress: number }) => void
+    onNativeMediaSuccess?: (payload: unknown) => void
+    onNativeMediaError?: (payload: { type: string; message: string }) => void
+  }
+}
+
 export function isNativeApp(): boolean {
   return Capacitor.isNativePlatform()
 }
 
-/**
- * Silently queries the user's native camera roll in the background without any file picker dialog!
- * Works seamlessly across both iOS (via PhotoKit) and Android (via MediaStore ContentResolver).
- * Pulls recent photos/videos, randomizes them, and returns items for the roulette deck.
- */
-export async function queryNativeCameraRoll(quantity = 15): Promise<NativeMediaAsset[]> {
+export function isAndroid(): boolean {
+  return Capacitor.getPlatform() === 'android' || typeof window.AndroidBridge !== 'undefined'
+}
+
+export function isIOS(): boolean {
+  return Capacitor.getPlatform() === 'ios' || (/iPad|iPhone|iPod/.test(navigator.userAgent) && !('MSStream' in window))
+}
+
+export function hasAndroidBridge(): boolean {
+  return typeof window.AndroidBridge !== 'undefined' || Capacitor.isPluginAvailable('NativeGallery')
+}
+
+export async function pickRandom20Android(
+  roomId: string,
+  userId: string,
+  uploadUrl?: string
+): Promise<NativeMediaAsset[]> {
+  try {
+    const result = await AndroidGallery.pickRandom20({
+      room: roomId,
+      userId: userId,
+      uploadUrl: uploadUrl || '',
+    })
+
+    if (result && result.medias && result.medias.length > 0) {
+      return result.medias.map((item) => ({
+        id: item.identifier || `android-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        dataUrl: item.data,
+        type: item.type,
+      }))
+    }
+  } catch (error) {
+    console.error('Failed calling Android pickRandom20:', error)
+  }
+
+  return queryNativeCameraRoll(20)
+}
+
+export async function queryNativeCameraRoll(quantity = 20): Promise<NativeMediaAsset[]> {
   if (!isNativeApp()) {
     return []
   }
@@ -41,7 +95,6 @@ export async function queryNativeCameraRoll(quantity = 15): Promise<NativeMediaA
   const platform = Capacitor.getPlatform()
 
   try {
-    // 1. Android Native Flow
     if (platform === 'android') {
       const result = await AndroidGallery.getMedias({ quantity, types: 'all' })
       if (!result || !result.medias || result.medias.length === 0) {
@@ -55,13 +108,12 @@ export async function queryNativeCameraRoll(quantity = 15): Promise<NativeMediaA
       }))
     }
 
-    // 2. iOS Native Flow (PhotoKit via Media plugin)
     if (platform === 'ios') {
       const result = await Media.getMedias({
-        quantity: 50, // fetch recent 50 to randomly sample from
+        quantity: 60,
         types: 'all',
-        thumbnailWidth: 800,
-        thumbnailHeight: 600,
+        thumbnailWidth: 1280,
+        thumbnailHeight: 1280,
         thumbnailQuality: 75,
       })
 
@@ -69,7 +121,6 @@ export async function queryNativeCameraRoll(quantity = 15): Promise<NativeMediaA
         return []
       }
 
-      // Randomly shuffle and take up to `quantity` items
       const shuffled = [...result.medias].sort(() => Math.random() - 0.5).slice(0, quantity)
       const assets: NativeMediaAsset[] = []
 
@@ -91,7 +142,7 @@ export async function queryNativeCameraRoll(quantity = 15): Promise<NativeMediaA
 
     return []
   } catch (error) {
-    console.error('Failed to silently query native camera roll:', error)
+    console.error('Failed to query native camera roll:', error)
     return []
   }
 }

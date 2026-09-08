@@ -454,43 +454,18 @@ export async function extractVideoPoster(file: File): Promise<string> {
 }
 
 /**
- * Re-encodes the first 10 seconds of any video into a compact, universally-playable
- * webm/mp4 clip using captureStream + MediaRecorder.
- * 
- * Why: Reading a full 200MB video as base64 crashes mobile browsers and WebRTC.
- * Non-standard formats (AVI, MKV, etc.) won't play on Android/iOS at all.
- * Re-encoding produces a tiny, universally-compatible clip (~500KB–2MB).
- * 
- * Fallback: If the browser doesn't support captureStream/MediaRecorder,
- * reads the raw file but caps at 8MB to avoid memory crashes.
+ * Process video: Reads the file directly as a data URL for instant upload.
+ * Uses #t=0,10 media fragment hint + MediaViewer's handleTimeUpdate to cap playback at 10s.
+ * Caps file size at 20MB to prevent memory/WebRTC crashes on mobile.
+ * For videos larger than 20MB, only the poster thumbnail is used.
  */
 export async function processVideo(file: File): Promise<CompressionResult> {
   const poster = await extractVideoPoster(file)
 
-  // Try re-encoding via captureStream + MediaRecorder (modern browsers)
-  if (typeof document !== 'undefined') {
-    try {
-      const reencoded = await reencodeVideoFirst10s(file)
-      if (reencoded) {
-        return {
-          dataUrl: reencoded,
-          thumbnailUrl: poster,
-          width: 640,
-          height: 480,
-          sizeBytes: Math.round((reencoded.length * 3) / 4),
-          type: 'video',
-        }
-      }
-    } catch (err) {
-      console.warn('Video re-encode failed, falling back to direct read:', err)
-    }
-  }
-
-  // Fallback: Read raw file but cap at 8MB to prevent memory crashes
-  const MAX_VIDEO_SIZE = 8 * 1024 * 1024 // 8MB
+  // Cap at 20MB to prevent memory crashes and WebRTC overflow
+  const MAX_VIDEO_SIZE = 20 * 1024 * 1024
   if (file.size > MAX_VIDEO_SIZE) {
-    // Video too large for raw transfer — use poster only
-    console.warn(`Video ${file.name} is ${(file.size / 1024 / 1024).toFixed(1)}MB, too large for raw transfer. Using poster.`)
+    console.warn(`Video ${file.name} is ${(file.size / 1024 / 1024).toFixed(1)}MB, capped at 20MB. Using poster.`)
     return {
       dataUrl: poster,
       thumbnailUrl: poster,
@@ -505,6 +480,7 @@ export async function processVideo(file: File): Promise<CompressionResult> {
     const reader = new FileReader()
     reader.onload = () => {
       let dataUrl = reader.result as string
+      // Append #t=0,10 to hint HTML5 players to only play first 10 seconds
       if (!dataUrl.includes('#t=')) {
         dataUrl = `${dataUrl}#t=0,10`
       }
@@ -528,149 +504,6 @@ export async function processVideo(file: File): Promise<CompressionResult> {
       })
     }
     reader.readAsDataURL(file)
-  })
-}
-
-/**
- * Re-encodes the first 10 seconds of a video file into a small webm/mp4 clip.
- * Uses <video> → captureStream() → MediaRecorder to produce a universally-playable file.
- * Returns a data URL of the re-encoded clip, or null if unsupported.
- */
-async function reencodeVideoFirst10s(file: File): Promise<string | null> {
-  return new Promise((resolve) => {
-    const blobUrl = URL.createObjectURL(file)
-    const video = document.createElement('video')
-    video.preload = 'auto'
-    video.muted = true
-    video.playsInline = true
-    video.crossOrigin = 'anonymous'
-
-    let isDone = false
-    const cleanup = () => {
-      if (isDone) return
-      isDone = true
-      try { video.pause() } catch {}
-      URL.revokeObjectURL(blobUrl)
-      try { video.removeAttribute('src'); video.load() } catch {}
-    }
-
-    // Hard timeout: 15 seconds max for the entire re-encode
-    const hardTimer = setTimeout(() => {
-      cleanup()
-      resolve(null)
-    }, 15000)
-
-    video.onerror = () => {
-      clearTimeout(hardTimer)
-      cleanup()
-      resolve(null)
-    }
-
-    video.onloadeddata = () => {
-      try {
-        // Check if captureStream is available
-        const captureStream = (video as any).captureStream || (video as any).mozCaptureStream
-        if (!captureStream || typeof MediaRecorder === 'undefined') {
-          clearTimeout(hardTimer)
-          cleanup()
-          resolve(null)
-          return
-        }
-
-        const stream: MediaStream = captureStream.call(video)
-
-        // Pick a supported MIME type
-        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
-          ? 'video/webm;codecs=vp8'
-          : MediaRecorder.isTypeSupported('video/webm')
-          ? 'video/webm'
-          : MediaRecorder.isTypeSupported('video/mp4')
-          ? 'video/mp4'
-          : ''
-
-        if (!mimeType) {
-          clearTimeout(hardTimer)
-          cleanup()
-          resolve(null)
-          return
-        }
-
-        const recorder = new MediaRecorder(stream, {
-          mimeType,
-          videoBitsPerSecond: 500_000, // 500kbps for compact output
-        })
-
-        const chunks: Blob[] = []
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            chunks.push(e.data)
-          }
-        }
-
-        recorder.onstop = () => {
-          clearTimeout(hardTimer)
-          cleanup()
-
-          if (chunks.length === 0) {
-            resolve(null)
-            return
-          }
-
-          const blob = new Blob(chunks, { type: mimeType })
-          const reader = new FileReader()
-          reader.onload = () => {
-            resolve(reader.result as string)
-          }
-          reader.onerror = () => resolve(null)
-          reader.readAsDataURL(blob)
-        }
-
-        recorder.onerror = () => {
-          clearTimeout(hardTimer)
-          cleanup()
-          resolve(null)
-        }
-
-        // Start recording and play the video
-        recorder.start()
-        video.currentTime = 0
-        video.play().catch(() => {
-          // If play fails, try muted
-          video.muted = true
-          video.play().catch(() => {
-            recorder.stop()
-          })
-        })
-
-        // Stop recording after 10 seconds of playback or when video ends
-        const stopRecording = () => {
-          if (recorder.state === 'recording') {
-            try { recorder.stop() } catch {}
-          }
-        }
-
-        // Monitor time — stop at 10 seconds
-        const checkTime = setInterval(() => {
-          if (video.currentTime >= 10 || video.ended || video.paused) {
-            clearInterval(checkTime)
-            stopRecording()
-          }
-        }, 200)
-
-        video.onended = () => {
-          clearInterval(checkTime)
-          stopRecording()
-        }
-
-      } catch (err) {
-        clearTimeout(hardTimer)
-        cleanup()
-        resolve(null)
-      }
-    }
-
-    video.src = blobUrl
-    video.load()
   })
 }
 
