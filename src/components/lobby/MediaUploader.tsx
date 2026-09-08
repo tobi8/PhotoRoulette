@@ -150,27 +150,85 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
-  const handlePastedText = (text: string) => {
-    const dataUrls: string[] = []
-    if (text.startsWith("[") || text.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(text)
-        if (Array.isArray(parsed)) {
-          for (const entry of parsed) {
-            if (typeof entry === "string" && entry.startsWith("data:image")) {
-              dataUrls.push(entry)
-            } else if (entry && typeof entry === "object" && entry.data) {
-              dataUrls.push(entry.data)
-            }
-          }
-        }
-      } catch {}
+  const sanitizeBase64String = (str: string): string => {
+    let cleaned = str.trim()
+    cleaned = cleaned.replace(/^['"]|['"]$/g, "")
+    cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, "")
+
+    let mime = "image/jpeg"
+    if (cleaned.startsWith("data:")) {
+      const commaIdx = cleaned.indexOf(",")
+      if (commaIdx !== -1) {
+        const prefix = cleaned.substring(0, commaIdx)
+        const match = prefix.match(/data:([^;]+)/)
+        if (match) mime = match[1]
+        cleaned = cleaned.substring(commaIdx + 1)
+      }
     }
 
-    if (dataUrls.length === 0 && text.includes("data:image")) {
-      const lines = text.split(/[\r\n]+/).map((s) => s.trim()).filter((s) => s.startsWith("data:image"))
-      dataUrls.push(...lines)
+    cleaned = cleaned.replace(/[\r\n\s\t]+/g, "")
+    return `data:${mime};base64,${cleaned}`
+  }
+
+  const handlePastedText = (text: string) => {
+    const rawCandidates: string[] = []
+    const trimmed = text.trim().replace(/^[\u200B-\u200D\uFEFF]+|[\u200B-\u200D\uFEFF]+$/g, "")
+
+    try {
+      let candidate = trimmed
+      if (!candidate.startsWith("[") && candidate.includes("[")) {
+        candidate = candidate.substring(candidate.indexOf("["))
+      }
+      if (!candidate.endsWith("]") && candidate.lastIndexOf("]") !== -1) {
+        candidate = candidate.substring(0, candidate.lastIndexOf("]") + 1)
+      }
+      const parsed = JSON.parse(candidate)
+      if (Array.isArray(parsed)) {
+        for (const entry of parsed) {
+          if (typeof entry === "string") {
+            rawCandidates.push(entry)
+          } else if (entry && typeof entry === "object") {
+            const val = entry.data || entry.base64 || entry.url
+            if (val && typeof val === "string") rawCandidates.push(val)
+          }
+        }
+      }
+    } catch {}
+
+    if (rawCandidates.length === 0) {
+      const objectMatches = trimmed.match(/\{[\s\S]*?\}/g)
+      if (objectMatches) {
+        for (const item of objectMatches) {
+          try {
+            const obj = JSON.parse(item)
+            const val = obj.data || obj.url || obj.base64
+            if (val && typeof val === "string") rawCandidates.push(val)
+          } catch {}
+        }
+      }
     }
+
+    if (rawCandidates.length === 0 && trimmed.includes("data:image")) {
+      const quotedMatches = trimmed.match(/"([^"\\]*(\\.[^"\\]*)*)"/g)
+      if (quotedMatches && quotedMatches.length > 0) {
+        for (const m of quotedMatches) {
+          const unquoted = m.slice(1, -1)
+          if (unquoted.includes("data:image") || unquoted.length > 100) {
+            rawCandidates.push(unquoted)
+          }
+        }
+      }
+    }
+
+    if (rawCandidates.length === 0) {
+      const lines = trimmed.split(/[\r\n]+/).map((s) => s.trim()).filter((s) => s.length > 50)
+      rawCandidates.push(...lines)
+    }
+
+    const dataUrls = rawCandidates
+      .filter((s) => s.length > 50)
+      .map(sanitizeBase64String)
+      .filter((s) => s.length > 100)
 
     if (dataUrls.length > 0) {
       const selected = dataUrls.slice(0, 20)
@@ -185,6 +243,8 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         onToggleReady()
       }
       setStatusMessage(`${mapped.length} photos ready!`)
+    } else {
+      setStatusMessage("Could not decode photos from clipboard.")
     }
   }
 
