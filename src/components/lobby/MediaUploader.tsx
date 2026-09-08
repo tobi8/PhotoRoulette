@@ -112,6 +112,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     excludeDocuments,
     toggleExclude,
     removePhoto,
+    replaceExcludedMedia,
     getApprovedMedia,
   } = useDocumentFilter()
 
@@ -503,6 +504,46 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
+  const handleAndroidReplaceExcluded = async () => {
+    const excludedCount = items.filter((i) => i.isExcluded).length
+    if (excludedCount === 0) {
+      setStatusMessage("No excluded photos to replace!")
+      setTimeout(() => setStatusMessage(null), 3000)
+      return
+    }
+
+    setIsPreparing(true)
+    setStatusMessage(`Replacing ${excludedCount} excluded photo${excludedCount > 1 ? "s" : ""}...`)
+    try {
+      if (hasAndroidBridge()) {
+        const assets = await rerollAndroid(mediaType)
+        if (assets && assets.length > 0) {
+          const currentIds = new Set(items.map((i) => i.id))
+          const fresh = assets.filter((a) => !currentIds.has(a.id)).slice(0, excludedCount)
+          const replacements = (fresh.length > 0 ? fresh : assets.slice(0, excludedCount)).map((a, idx) => ({
+            id: `rep_${Date.now()}_${idx}`,
+            type: a.type,
+            dataUrl: a.dataUrl,
+          }))
+          replaceExcludedMedia(replacements)
+          setStatusMessage(`Replaced ${replacements.length} photo${replacements.length > 1 ? "s" : ""}!`)
+          await autoExcludeBoringDocuments(replacements)
+          setIsPreparing(false)
+          return
+        }
+        setStatusMessage("No replacement media found.")
+      } else {
+        setStatusMessage("Android gallery bridge not available.")
+      }
+    } catch (e: any) {
+      console.error(e)
+      setStatusMessage("Failed to replace excluded photos.")
+    } finally {
+      setIsPreparing(false)
+      setTimeout(() => setStatusMessage(null), 4000)
+    }
+  }
+
   const approvedItems = useMemo(() => {
     let list = items.filter((i) => !i.isExcluded)
     if (mediaType === "videos_only") {
@@ -528,7 +569,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   }
 
   return (
-    <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl space-y-4">
+    <div className="w-full bg-[#171527] border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-xl space-y-3 sm:space-y-4">
       <input
         ref={guaranteedInputRef}
         type="file"
@@ -694,22 +735,23 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto p-1.5 bg-black/30 rounded-2xl border border-white/5">
+          <div className="grid grid-cols-5 gap-1.5 sm:gap-2 max-h-36 sm:max-h-48 overflow-y-auto p-1.5 bg-black/30 rounded-2xl border border-white/5">
             {items.map((item) => (
               <div
                 key={item.id}
-                className={`relative aspect-square rounded-xl overflow-hidden group border bg-slate-800 ${
+                onClick={() => toggleExclude(item.id)}
+                className={`relative aspect-square rounded-xl overflow-hidden cursor-pointer transition-all active:scale-95 group border bg-slate-800 ${
                   item.isGuaranteed
                     ? "border-amber-400/80 ring-2 ring-amber-400/50"
                     : item.isExcluded
-                    ? "border-red-500/30 opacity-40"
-                    : "border-white/10"
+                    ? "border-red-500/50 opacity-40 grayscale"
+                    : "border-white/15 hover:border-white/40"
                 }`}
               >
                 <img
                   src={item.dataUrl}
                   alt="Selected media"
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover select-none pointer-events-none"
                 />
                 {item.isGuaranteed && (
                   <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 text-[9px] font-black flex items-center gap-0.5 shadow-md">
@@ -718,17 +760,12 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                   </div>
                 )}
                 {item.isExcluded && (
-                  <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-red-600/80 text-white text-[9px] font-bold">
-                    Excluded
+                  <div className="absolute inset-0 bg-red-950/60 flex items-center justify-center">
+                    <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold shadow">
+                      Excluded
+                    </span>
                   </div>
                 )}
-                <button
-                  type="button"
-                  onClick={(e) => handleRemoveSingle(item.id, e)}
-                  className="absolute top-1 right-1 p-1 rounded-md bg-red-600/80 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <Trash2 size={12} />
-                </button>
               </div>
             ))}
           </div>
@@ -772,11 +809,11 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                     variant="outline"
                     size="sm"
                     fullWidth
-                    onClick={handleAndroidPick}
-                    disabled={isPreparing}
-                    className="border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs py-2"
+                    onClick={handleAndroidReplaceExcluded}
+                    disabled={isPreparing || !items.some((i) => i.isExcluded)}
+                    className="border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs py-2 disabled:opacity-40"
                   >
-                    <Smartphone size={14} /> Pick New
+                    <Sparkles size={14} /> Replace Excluded
                   </Button>
                 </div>
               </div>

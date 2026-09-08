@@ -136,8 +136,13 @@ export default function App() {
   // Final Awards
   const [gameAwards, setGameAwards] = useState<GameAwards>({})
 
-  // Form states on landing
-  const [inputName, setInputName] = useState('')
+  const [inputName, setInputName] = useState(() => {
+    try {
+      return localStorage.getItem('photo_roulette_username') || ''
+    } catch {
+      return ''
+    }
+  })
   const [inputRoomCode, setInputRoomCode] = useState('')
   const [selectedAvatar, setSelectedAvatar] = useState(AVATAR_EMOJIS[0])
   const [selectedColor, setSelectedColor] = useState(AVATAR_COLORS[0])
@@ -528,12 +533,19 @@ export default function App() {
   // Host Game Logic & Transitions
   // --------------------------------------------------------------------------
   const startHostGame = async () => {
+    const trimmed = inputName.trim()
+    if (trimmed) {
+      try {
+        localStorage.setItem('photo_roulette_username', trimmed)
+      } catch {}
+    }
+
     const code = generateRoomCode()
     const { peerId: generatedPeerId } = await peerConnection.createRoom(code)
 
     const hostPlayer: Player = {
       id: generatedPeerId,
-      name: inputName.trim() || 'Host',
+      name: trimmed || 'Host',
       avatar: selectedAvatar,
       color: selectedColor,
       isHost: true,
@@ -560,16 +572,22 @@ export default function App() {
     playPop()
   }
 
-  // Client joins existing room
   const joinExistingGame = async () => {
     if (!inputRoomCode.trim()) return
+
+    const trimmed = inputName.trim()
+    if (trimmed) {
+      try {
+        localStorage.setItem('photo_roulette_username', trimmed)
+      } catch {}
+    }
 
     const formattedCode = formatRoomCode(inputRoomCode)
     const { peerId: generatedPeerId } = await peerConnection.joinRoom(formattedCode)
 
     const clientPlayer: Player = {
       id: generatedPeerId,
-      name: inputName.trim() || `Player ${Math.floor(Math.random() * 900 + 100)}`,
+      name: trimmed || `Player ${Math.floor(Math.random() * 900 + 100)}`,
       avatar: selectedAvatar,
       color: selectedColor,
       isHost: false,
@@ -592,7 +610,6 @@ export default function App() {
       phase: 'LOBBY',
     })
 
-    // Send Join Request to Host
     peerConnection.sendToHost({
       type: 'JOIN_REQUEST',
       senderId: generatedPeerId,
@@ -1131,7 +1148,7 @@ export default function App() {
   return (
     <div className="min-h-screen w-full bg-[#0d0b18] text-gray-100 flex flex-col justify-between selection:bg-violet-600 selection:text-white">
       {/* Top Navigation Bar */}
-      <header className="w-full max-w-4xl mx-auto px-4 pt-6 sm:pt-8 pb-3 flex items-center justify-between z-30 pt-[max(1.5rem,env(safe-area-inset-top))]">
+      <header className="w-full max-w-4xl mx-auto px-4 pt-3 sm:pt-5 pb-2 flex items-center justify-between z-30 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div
           onClick={handleLeaveGame}
           className="flex items-center gap-2 cursor-pointer select-none"
@@ -1317,10 +1334,10 @@ export default function App() {
         {/* 2. LOBBY SCREEN */}
         {/* ==================================================================== */}
         {phase === 'LOBBY' && (
-          <div className="w-full space-y-6 py-4 animate-in fade-in duration-300">
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+          <div className="w-full space-y-4 sm:space-y-6 py-2 sm:py-4 animate-in fade-in duration-300">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-6">
               {/* Left Column: QR Code & Settings */}
-              <div className="md:col-span-5 space-y-4">
+              <div className="md:col-span-5 space-y-3 sm:space-y-4">
                 <QRCodeDisplay roomCode={peerConnection.roomCode} />
 
                 <SettingsDrawer
@@ -1389,7 +1406,7 @@ export default function App() {
         {/* 4. ACTIVE ROUND SCREEN */}
         {/* ==================================================================== */}
         {phase === 'ACTIVE_ROUND' && activeRound.activeMedia && (
-          <div className="w-full max-w-xl mx-auto space-y-4 py-2 animate-in fade-in duration-200">
+          <div className="w-full max-w-xl mx-auto space-y-2.5 sm:space-y-4 py-1 sm:py-2 animate-in fade-in duration-200">
             {/* Round info & Timer Bar */}
             <div className="flex items-center justify-between text-xs text-gray-400 px-1">
               <span className="font-bold text-violet-300">

@@ -44,9 +44,16 @@ export const RevealCard: React.FC<RevealCardProps> = ({
     return () => clearInterval(interval)
   }, [autoAdvanceSeconds])
 
-  const myAnswer = results?.answers[currentPlayerId || '']
-  const myGuessedPlayer = myAnswer
-    ? players.find((p) => p.id === myAnswer.guessedPlayerId)
+  const myAnswer =
+    results?.answers[currentPlayerId || ''] ||
+    (currentPlayerId
+      ? Object.entries(results?.answers || {}).find(([id]) => id === currentPlayerId)?.[1]
+      : undefined) ||
+    Object.values(results?.answers || {})[0]
+
+  const myGuessedPlayer = myAnswer?.guessedPlayerId
+    ? players.find((p) => p.id === myAnswer.guessedPlayerId) ||
+      players.find((p) => p.name.toLowerCase() === myAnswer.guessedPlayerId.toLowerCase())
     : undefined
 
   const fastestPlayer = results?.fastestGuesserId
@@ -146,7 +153,9 @@ export const RevealCard: React.FC<RevealCardProps> = ({
             {players.map((p) => {
               const ans = results.answers[p.id]
               if (!ans) return null
-              const guessedP = players.find((item) => item.id === ans.guessedPlayerId)
+              const guessedP =
+                players.find((item) => item.id === ans.guessedPlayerId) ||
+                players.find((item) => item.name.toLowerCase() === ans.guessedPlayerId.toLowerCase())
 
               return (
                 <div

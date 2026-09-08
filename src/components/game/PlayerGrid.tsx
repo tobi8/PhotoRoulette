@@ -21,12 +21,12 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
   currentPlayerId,
 }) => {
   return (
-    <div className="w-full space-y-2">
-      <div className="text-xs font-bold text-center text-gray-400 tracking-wider uppercase">
+    <div className="w-full space-y-1.5 sm:space-y-2">
+      <div className="text-[11px] sm:text-xs font-bold text-center text-gray-400 tracking-wider uppercase">
         {hasAnswered ? 'Answer Locked In! 🔒' : 'Whose photo is this? Tap to guess!'}
       </div>
 
-      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
         {players.map((player) => {
           const isSelected = selectedPlayerId === player.id
           const isYou = player.id === currentPlayerId
@@ -36,7 +36,7 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
               key={player.id}
               disabled={disabled || hasAnswered}
               onClick={() => onSelectPlayer(player.id)}
-              className={`relative flex items-center gap-2.5 p-3 rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-95 disabled:active:scale-100 ${
+              className={`relative flex items-center gap-2 sm:gap-2.5 p-2 sm:p-3 rounded-xl sm:rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-95 disabled:active:scale-100 ${
                 isSelected
                   ? 'bg-gradient-to-r from-violet-600 to-indigo-600 border-violet-400 text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/50'
                   : hasAnswered

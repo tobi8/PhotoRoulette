@@ -17,16 +17,16 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   const totalRoundsOptions = [5, 10, 15, 20]
 
   return (
-    <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl">
-      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
+    <div className="w-full bg-[#171527] border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-xl">
+      <div className="flex items-center gap-2 mb-3 pb-2.5 border-b border-white/10">
         <Settings size={18} className="text-violet-400" />
-        <h3 className="font-bold text-white text-base">Game Rules & Settings</h3>
+        <h3 className="font-bold text-white text-sm sm:text-base">Game Rules & Settings</h3>
         {!isHost && (
           <span className="text-xs text-gray-400 ml-auto">(Host Controls)</span>
         )}
       </div>
 
-      <div className="space-y-4 text-sm">
+      <div className="space-y-3 sm:space-y-4 text-sm">
 
         {/* Round Duration */}
         <div>

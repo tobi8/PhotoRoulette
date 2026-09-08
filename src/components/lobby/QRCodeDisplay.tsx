@@ -42,21 +42,22 @@ export const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({ roomCode }) => {
   }
 
   return (
-    <div className="flex flex-col items-center p-6 bg-[#171527] border border-violet-500/20 rounded-3xl shadow-2xl">
-      <span className="text-xs font-bold tracking-widest text-violet-400 uppercase mb-1">
+    <div className="flex flex-col items-center p-3.5 sm:p-6 bg-[#171527] border border-violet-500/20 rounded-2xl sm:rounded-3xl shadow-2xl">
+      <span className="text-[10px] sm:text-xs font-bold tracking-widest text-violet-400 uppercase mb-1">
         ROOM CODE
       </span>
 
       {/* Big bold room code */}
-      <div className="text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-violet-400 via-pink-400 to-amber-300 tracking-wider mb-4 font-mono select-all">
+      <div className="text-3xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-violet-400 via-pink-400 to-amber-300 tracking-wider mb-2.5 sm:mb-4 font-mono select-all">
         {roomCode}
       </div>
 
       {/* QR Code Container */}
-      <div className="p-3 bg-white rounded-2xl shadow-xl mb-4">
+      <div className="p-2 sm:p-3 bg-white rounded-xl sm:rounded-2xl shadow-xl mb-2 sm:mb-4">
         <QRCodeSVG
           value={joinUrl}
-          size={180}
+          size={130}
+          className="sm:w-[170px] sm:h-[170px]"
           level="M"
           includeMargin={false}
         />

@@ -35,27 +35,18 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
       return
     }
 
-    const start = Date.now()
-    const totalMs = durationSec * 1000
-
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - start
-      const factor = Math.min(1, elapsed / (totalMs * 0.85))
-      const currentBlur = Math.max(0, 24 * (1 - factor))
-      setBlurAmount(currentBlur)
-
-      if (factor >= 1) {
-        clearInterval(interval)
-      }
+    setBlurAmount(24)
+    const timer = setTimeout(() => {
+      setBlurAmount(0)
     }, 50)
 
-    return () => clearInterval(interval)
-  }, [progressiveBlur, durationSec, media.id])
+    return () => clearTimeout(timer)
+  }, [progressiveBlur, media.id])
 
   return (
     <div
-      className={`relative w-full rounded-3xl overflow-hidden bg-black/90 border border-white/15 shadow-2xl flex items-center justify-center ${
-        isHostTV ? 'h-[55vh] max-h-[600px]' : 'h-[36vh] max-h-[320px]'
+      className={`relative w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black/90 border border-white/15 shadow-2xl flex items-center justify-center ${
+        isHostTV ? 'h-[55vh] max-h-[600px]' : 'h-[26vh] sm:h-[34vh] max-h-[280px]'
       }`}
     >
       {!isVetoed ? (
@@ -77,7 +68,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
             className="w-full h-full object-contain select-none pointer-events-none"
             style={{
               filter: `blur(${blurAmount}px)`,
-              transition: 'filter 0.08s linear',
+              transition: `filter ${durationSec * 0.85}s cubic-bezier(0.2, 0.8, 0.2, 1)`,
             }}
           />
         )

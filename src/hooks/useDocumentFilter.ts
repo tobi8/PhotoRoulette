@@ -68,6 +68,26 @@ export function useDocumentFilter() {
     setItems([])
   }, [])
 
+  const replaceExcludedMedia = useCallback(
+    (newMedia: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }>) => {
+      setItems((prev) => {
+        const kept = prev.filter((i) => !i.isExcluded)
+        const mappedNew: FilterResultItem[] = newMedia.map((m) => ({
+          id: m.id,
+          previewUrl: m.dataUrl,
+          dataUrl: m.dataUrl,
+          type: m.type,
+          reason: 'Replacement photo',
+          confidence: 0,
+          isExcluded: false,
+          isGuaranteed: false,
+        }))
+        return [...kept, ...mappedNew]
+      })
+    },
+    []
+  )
+
   const acceptedCount = items.filter((i) => !i.isExcluded).length
   const excludedCount = items.filter((i) => i.isExcluded).length
 
@@ -99,6 +119,7 @@ export function useDocumentFilter() {
     toggleExclude,
     removePhoto,
     clearPhotos,
+    replaceExcludedMedia,
     acceptedCount,
     excludedCount,
     getApprovedMedia,

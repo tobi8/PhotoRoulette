@@ -28,7 +28,7 @@ export const TimerBar: React.FC<TimerBarProps> = ({
         clearInterval(interval)
         onExpire?.()
       }
-    }, 40)
+    }, 100)
 
     return () => clearInterval(interval)
   }, [durationSec, startTime, isPaused, onExpire])
@@ -59,7 +59,7 @@ export const TimerBar: React.FC<TimerBarProps> = ({
       {/* Bar container */}
       <div className="w-full h-3 bg-black/50 rounded-full overflow-hidden border border-white/10 p-0.5">
         <div
-          className={`h-full rounded-full transition-all duration-75 ${
+          className={`h-full rounded-full transition-all duration-100 ease-linear ${
             isUrgent
               ? 'bg-gradient-to-r from-red-600 to-rose-500 shadow-[0_0_12px_rgba(239,68,68,0.8)]'
               : progressPercent < 50
