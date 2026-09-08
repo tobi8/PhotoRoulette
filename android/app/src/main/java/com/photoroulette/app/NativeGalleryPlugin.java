@@ -100,7 +100,8 @@ public class NativeGalleryPlugin extends Plugin {
         }
     }
 
-    private boolean hasRequiredPermissions() {
+    @Override
+    public boolean hasRequiredPermissions() {
         if (Build.VERSION.SDK_INT >= 33) {
             return getPermissionState("images") == PermissionState.GRANTED;
         } else {
