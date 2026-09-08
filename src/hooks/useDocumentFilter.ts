@@ -6,45 +6,64 @@ export type FilterResultItem = ExcludedMediaItem & { dataUrl: string; type: 'ima
 export function useDocumentFilter() {
   const [items, setItems] = useState<FilterResultItem[]>([])
 
-  /**
-   * Loads media items (e.g. from iOS Shortcut or Android bridge) directly into state
-   */
   const loadExistingMedia = useCallback(
-    (mediaItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string }>) => {
+    (mediaItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string; isGuaranteed?: boolean }>) => {
       setItems(
         mediaItems.map((item) => ({
           id: item.id,
           previewUrl: item.previewUrl || item.dataUrl,
           dataUrl: item.dataUrl,
           type: item.type,
-          reason: 'Loaded via shortcut',
+          reason: 'Loaded media',
           confidence: 0,
           isExcluded: false,
+          isGuaranteed: item.isGuaranteed || false,
         }))
       )
     },
     []
   )
 
-  /**
-   * Allows user to un-exclude (restore) or manually exclude a photo in the review UI
-   */
+  const setGuaranteedPhoto = useCallback(
+    (photo: { id: string; type: 'image' | 'video'; dataUrl: string }) => {
+      setItems((prev) => {
+        const withoutOldGuaranteed = prev.filter((item) => !item.isGuaranteed)
+        const newItem: FilterResultItem = {
+          id: photo.id,
+          previewUrl: photo.dataUrl,
+          dataUrl: photo.dataUrl,
+          type: photo.type,
+          reason: 'Guaranteed Photo',
+          confidence: 0,
+          isExcluded: false,
+          isGuaranteed: true,
+        }
+        return [newItem, ...withoutOldGuaranteed]
+      })
+    },
+    []
+  )
+
+  const excludeDocuments = useCallback((excludedIds: string[]) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        excludedIds.includes(item.id)
+          ? { ...item, isExcluded: true, reason: 'AI detected document' }
+          : item
+      )
+    )
+  }, [])
+
   const toggleExclude = useCallback((id: string) => {
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, isExcluded: !item.isExcluded } : item))
     )
   }, [])
 
-  /**
-   * Delete a photo permanently from the pool
-   */
   const removePhoto = useCallback((id: string) => {
     setItems((prev) => prev.filter((item) => item.id !== id))
   }, [])
 
-  /**
-   * Clear all loaded photos
-   */
   const clearPhotos = useCallback(() => {
     setItems([])
   }, [])
@@ -66,6 +85,7 @@ export function useDocumentFilter() {
         ownerName: '',
         type: i.type,
         dataUrl: i.dataUrl,
+        isGuaranteed: i.isGuaranteed,
       }))
     },
     [items]
@@ -74,6 +94,8 @@ export function useDocumentFilter() {
   return {
     items,
     loadExistingMedia,
+    setGuaranteedPhoto,
+    excludeDocuments,
     toggleExclude,
     removePhoto,
     clearPhotos,

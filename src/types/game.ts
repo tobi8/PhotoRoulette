@@ -21,6 +21,7 @@ export interface MediaItem {
   previewUrl?: string
   aspectRatio?: number
   duration?: number
+  isGuaranteed?: boolean
 }
 
 export interface ExcludedMediaItem {
@@ -30,6 +31,7 @@ export interface ExcludedMediaItem {
   reason: string
   confidence: number
   isExcluded: boolean
+  isGuaranteed?: boolean
 }
 
 export interface GameSettings {

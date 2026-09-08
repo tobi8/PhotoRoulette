@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { ShieldAlert, AlertTriangle, Film, ImageOff } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { ShieldAlert, AlertTriangle, ImageOff } from 'lucide-react'
 
 interface MediaViewerProps {
   media: {
@@ -20,52 +20,15 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
   progressiveBlur = false,
   durationSec = 5,
   isVetoed = false,
-  isTimeUp = false,
   isHostTV = false,
-  isMuted = false,
 }) => {
   const [blurAmount, setBlurAmount] = useState(progressiveBlur ? 24 : 0)
   const [hasError, setHasError] = useState(false)
-  const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
     setHasError(false)
   }, [media.id, media.dataUrl])
 
-  // Manage video playback: automatically pauses when time expires, vetoed, or reaches 10s
-  useEffect(() => {
-    if (media.type === 'video' && videoRef.current) {
-      if (isTimeUp || isVetoed) {
-        videoRef.current.pause()
-      } else {
-        videoRef.current.currentTime = 0
-        videoRef.current.muted = isMuted
-        videoRef.current.play().catch(() => {
-          // Guaranteed fallback if browser requires muted autoplay
-          if (videoRef.current) {
-            videoRef.current.muted = true
-            videoRef.current.play().catch(() => {})
-          }
-        })
-      }
-    }
-  }, [media.type, isTimeUp, isVetoed, media.id, isMuted])
-
-  // Sync mute dynamically when user toggles global sound during video playback
-  useEffect(() => {
-    if (media.type === 'video' && videoRef.current) {
-      videoRef.current.muted = isMuted
-    }
-  }, [isMuted, media.type])
-
-  const handleTimeUpdate = () => {
-    // Strictly cap playback at 10 seconds max
-    if (videoRef.current && videoRef.current.currentTime >= 10) {
-      videoRef.current.pause()
-    }
-  }
-
-  // Progressive blur animation
   useEffect(() => {
     if (!progressiveBlur) {
       setBlurAmount(0)
@@ -95,7 +58,6 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
         isHostTV ? 'h-[55vh] max-h-[600px]' : 'h-[36vh] max-h-[320px]'
       }`}
     >
-      {/* Active Media */}
       {!isVetoed ? (
         hasError ? (
           <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center bg-gradient-to-br from-violet-950/80 via-purple-900/60 to-indigo-950/80 text-white">
@@ -106,29 +68,6 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
             <p className="text-xs text-violet-300/80 mt-1 max-w-xs">
               Who took this mysterious shot? Cast your guess!
             </p>
-          </div>
-        ) : media.type === 'video' ? (
-          <div className="relative w-full h-full flex items-center justify-center">
-            <video
-              ref={videoRef}
-              src={media.dataUrl}
-              autoPlay
-              playsInline
-              muted={isMuted}
-              onError={() => setHasError(true)}
-              onTimeUpdate={handleTimeUpdate}
-              className="w-full h-full object-contain"
-              style={{
-                filter: `blur(${blurAmount}px)`,
-                transition: 'filter 0.08s linear',
-              }}
-            />
-
-            {/* Video Badge */}
-            <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/15 text-white/90 text-xs font-semibold shadow-lg pointer-events-none z-10">
-              <Film size={12} className="text-violet-400" />
-              <span>Video (Max 10s)</span>
-            </div>
           </div>
         ) : (
           <img

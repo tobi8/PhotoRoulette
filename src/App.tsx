@@ -43,17 +43,15 @@ import { MediaUploader } from './components/lobby/MediaUploader'
 import { MediaViewer } from './components/game/MediaViewer'
 import { TimerBar } from './components/game/TimerBar'
 import { PlayerGrid } from './components/game/PlayerGrid'
-import { PanicButton } from './components/game/PanicButton'
 import { RevealCard } from './components/game/RevealCard'
 
-// Scoreboard Components
 import { LeaderboardRace } from './components/scoreboard/LeaderboardRace'
 import { Podium } from './components/scoreboard/Podium'
 
 const DEFAULT_SETTINGS: GameSettings = {
   roundDuration: 5,
   totalRounds: 10,
-  mediaType: 'mixed',
+  mediaType: 'photos_only',
   progressiveBlur: false,
   tvMode: false,
 }
@@ -1420,12 +1418,6 @@ export default function App() {
               isMuted={isMuted}
             />
 
-            {/* Owner Panic Button (visible ONLY to the owner of this active photo) */}
-            {activeRound.activeMedia.isOwner && !activeRound.isVetoed && (
-              <PanicButton onPanicVeto={handlePanicVetoClick} />
-            )}
-
-            {/* Answer Grid (Hidden on Host TV mode if Host is not playing) */}
             {(!settings.tvMode || !currentPlayer?.isHost) && !activeRound.isVetoed && (
               <PlayerGrid
                 players={players}

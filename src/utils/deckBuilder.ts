@@ -24,29 +24,9 @@ export function buildBalancedRouletteDeck(
   mediaType: 'photos_only' | 'videos_only' | 'mixed' = 'photos_only',
   totalRoundsRequested: number = 10
 ): MediaItem[] {
-  let eligibleDeck = [...rawDeck]
-  if (mediaType === 'photos_only') {
-    eligibleDeck = eligibleDeck.filter((m) => m.type === 'image')
-  } else if (mediaType === 'videos_only') {
-    eligibleDeck = eligibleDeck.filter((m) => m.type === 'video')
-  }
+  let eligibleDeck = rawDeck.filter((m) => m.type === 'image')
 
-  // If no media uploaded, fallback to party packs
   if (eligibleDeck.length === 0) {
-    if (mediaType === 'videos_only') {
-      return getMockPartyVideos().slice(0, totalRoundsRequested).map((v, idx) => ({
-        ...v,
-        ownerId: players[idx % players.length]?.id || 'host',
-        ownerName: players[idx % players.length]?.name || 'Player',
-      }))
-    }
-    if (mediaType === 'mixed') {
-      return getMockPartyDeck('mixed').slice(0, totalRoundsRequested).map((m, idx) => ({
-        ...m,
-        ownerId: players[idx % players.length]?.id || 'host',
-        ownerName: players[idx % players.length]?.name || 'Player',
-      }))
-    }
     return getMockPartyPhotos().slice(0, totalRoundsRequested).map((p, idx) => ({
       ...p,
       ownerId: players[idx % players.length]?.id || 'host',
@@ -54,30 +34,6 @@ export function buildBalancedRouletteDeck(
     }))
   }
 
-  if (mediaType === 'mixed') {
-    // If user chose mixed mode, ensure both photos and videos are present in the eligible deck
-    const hasPhotos = eligibleDeck.some((m) => m.type === 'image')
-    const hasVideos = eligibleDeck.some((m) => m.type === 'video')
-
-    if (!hasVideos) {
-      const mockVideos = getMockPartyVideos().map((v, idx) => ({
-        ...v,
-        ownerId: players[idx % players.length]?.id || 'host',
-        ownerName: players[idx % players.length]?.name || 'Player',
-      }))
-      eligibleDeck = [...eligibleDeck, ...mockVideos]
-    }
-    if (!hasPhotos) {
-      const mockPhotos = getMockPartyPhotos().map((p, idx) => ({
-        ...p,
-        ownerId: players[idx % players.length]?.id || 'host',
-        ownerName: players[idx % players.length]?.name || 'Player',
-      }))
-      eligibleDeck = [...eligibleDeck, ...mockPhotos]
-    }
-  }
-
-  // Group media by player ownerId
   const playerMediaMap = new Map<string, MediaItem[]>()
   for (const item of eligibleDeck) {
     const list = playerMediaMap.get(item.ownerId) || []
@@ -85,9 +41,10 @@ export function buildBalancedRouletteDeck(
     playerMediaMap.set(item.ownerId, list)
   }
 
-  // Shuffle each player's individual pool so their own selected items are random
   for (const [pId, items] of playerMediaMap.entries()) {
-    playerMediaMap.set(pId, fisherYatesShuffle(items))
+    const guaranteed = items.filter((m) => m.isGuaranteed)
+    const nonGuaranteed = fisherYatesShuffle(items.filter((m) => !m.isGuaranteed))
+    playerMediaMap.set(pId, [...guaranteed, ...nonGuaranteed])
   }
 
   const activeContributorIds = Array.from(playerMediaMap.keys()).filter(

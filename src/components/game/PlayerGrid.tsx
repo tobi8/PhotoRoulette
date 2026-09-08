@@ -52,7 +52,7 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
                 </div>
                 {isYou && (
                   <span className="text-[10px] text-gray-400 block -mt-0.5">
-                    (Your Photo?)
+                    (You)
                   </span>
                 )}
               </div>

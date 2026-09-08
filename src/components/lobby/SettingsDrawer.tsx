@@ -1,5 +1,5 @@
 import React from 'react'
-import { Settings, Clock, Layers, Eye, Tv, Film, Image as ImageIcon, Sparkles } from 'lucide-react'
+import { Settings, Clock, Layers, Eye, Tv } from 'lucide-react'
 import { GameSettings } from '../../types/game'
 
 interface SettingsDrawerProps {
@@ -16,16 +16,6 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   const roundDurations = [3, 5, 8, 10]
   const totalRoundsOptions = [5, 10, 15, 20]
 
-  const mediaTypes: Array<{
-    id: 'photos_only' | 'videos_only' | 'mixed'
-    label: string
-    icon: React.ReactNode
-  }> = [
-    { id: 'photos_only', label: 'Photos Only', icon: <ImageIcon size={14} /> },
-    { id: 'videos_only', label: 'Videos Only', icon: <Film size={14} /> },
-    { id: 'mixed', label: 'Mixed (Both)', icon: <Sparkles size={14} /> },
-  ]
-
   return (
     <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl">
       <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
@@ -37,30 +27,6 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
       </div>
 
       <div className="space-y-4 text-sm">
-        {/* Media Type Selector (Photos, Videos, Mixed) */}
-        <div>
-          <label className="text-gray-300 font-semibold mb-2 flex items-center gap-1.5">
-            <Film size={15} className="text-indigo-400" />
-            <span>Allowed Media</span>
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {mediaTypes.map((mt) => (
-              <button
-                key={mt.id}
-                disabled={!isHost}
-                onClick={() => onUpdateSettings({ ...settings, mediaType: mt.id })}
-                className={`py-2 px-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
-                  settings.mediaType === mt.id
-                    ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-900/40 border border-violet-400/40'
-                    : 'bg-white/5 text-gray-300 hover:bg-white/10 border border-white/5'
-                } ${!isHost ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                {mt.icon}
-                <span className="truncate">{mt.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* Round Duration */}
         <div>

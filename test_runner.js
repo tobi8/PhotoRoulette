@@ -135,4 +135,16 @@ assert.ok(countsByOwner['player_b'] >= 3, `Player B should have fair share (got 
 assert.ok(countsByOwner['player_c'] >= 3, `Player C should have fair share (got ${countsByOwner['player_c']})`)
 console.log('✅ Balanced deck distribution passed (Host: %d, Player B: %d, Player C: %d)', countsByOwner['host'], countsByOwner['player_b'], countsByOwner['player_c'])
 
+const deckWithGuaranteed = [
+  ...Array.from({ length: 20 }, (_, i) => ({ id: `host_${i}`, type: 'image', dataUrl: 'data:image/jpeg;base64,123', ownerId: 'host', ownerName: 'Host' })),
+  { id: 'b_guaranteed', type: 'image', dataUrl: 'data:image/jpeg;base64,star', ownerId: 'player_b', ownerName: 'Player B', isGuaranteed: true },
+  ...Array.from({ length: 19 }, (_, i) => ({ id: `b_${i}`, type: 'image', dataUrl: 'data:image/jpeg;base64,456', ownerId: 'player_b', ownerName: 'Player B' })),
+]
+
+for (let trial = 0; trial < 10; trial++) {
+  const resultDeck = buildBalancedRouletteDeck(deckWithGuaranteed, testPlayersList.slice(0, 2), 'photos_only', 10)
+  assert.ok(resultDeck.some((m) => m.id === 'b_guaranteed'), 'Guaranteed photo must 100% appear in the deck')
+}
+console.log('✅ Guaranteed photo 100% inclusion passed across 10 trials')
+
 console.log('🎉 All automated tests passed successfully!')

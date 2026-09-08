@@ -8,7 +8,7 @@ import {
   ShieldCheck,
   Trash2,
   Eye,
-  PlayCircle,
+  Star,
   ExternalLink,
   RefreshCw,
   Image as ImageIcon,
@@ -25,10 +25,11 @@ import {
   requestAndroidGalleryPermission,
   openAndroidAppSettings,
 } from "../../services/nativeMediaService"
-import { compressImage, processVideo } from "../../utils/imageCompression"
+import { compressImage } from "../../utils/imageCompression"
+import { analyzeImageHeuristics } from "../../utils/documentHeuristics"
 
 interface MediaUploaderProps {
-  onMediaReady: (mediaItems: Array<{ id: string; type: "image" | "video"; dataUrl: string }>) => void
+  onMediaReady: (mediaItems: Array<{ id: string; type: "image" | "video"; dataUrl: string; isGuaranteed?: boolean }>) => void
   isReady: boolean
   onToggleReady: () => void
   mediaType?: "photos_only" | "videos_only" | "mixed"
@@ -48,8 +49,10 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   userId,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const guaranteedInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [isPreparing, setIsPreparing] = useState(false)
+  const [isScanningDocs, setIsScanningDocs] = useState(false)
   const [permissionDenied, setPermissionDenied] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [isPendingPaste, setIsPendingPaste] = useState<boolean>(() => {
@@ -108,35 +111,92 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const {
     items,
     loadExistingMedia,
+    setGuaranteedPhoto,
+    excludeDocuments,
     toggleExclude,
     removePhoto,
     getApprovedMedia,
   } = useDocumentFilter()
 
+  const hasGuaranteed = useMemo(() => items.some((i) => i.isGuaranteed), [items])
+
+  useEffect(() => {
+    if (items.length > 0) {
+      const approved = getApprovedMedia(mediaType)
+      onMediaReady(approved)
+    }
+  }, [items, mediaType, getApprovedMedia, onMediaReady])
+
+  const handleGuaranteedPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ""
+    setIsPreparing(true)
+    setStatusMessage("Processing guaranteed photo...")
+    try {
+      const res = await compressImage(file, 800, 0.65)
+      const guaranteedItem = {
+        id: `guaranteed_${Date.now()}`,
+        type: "image" as const,
+        dataUrl: res.dataUrl,
+      }
+      setGuaranteedPhoto(guaranteedItem)
+      if (!isReady) {
+        onToggleReady()
+      }
+      setStatusMessage("1 Guaranteed photo selected!")
+    } catch (err) {
+      console.error(err)
+      setStatusMessage("Failed to process photo.")
+    } finally {
+      setIsPreparing(false)
+      setTimeout(() => setStatusMessage(null), 4000)
+    }
+  }
+
+  const handleExcludeDocuments = async () => {
+    if (items.length === 0 || isScanningDocs) return
+    setIsScanningDocs(true)
+    setStatusMessage("Scanning photos with AI...")
+    try {
+      const docIds: string[] = []
+      for (const item of items) {
+        if (item.isGuaranteed) continue
+        const res = await analyzeImageHeuristics(item.dataUrl)
+        if (res.isDocument) {
+          docIds.push(item.id)
+        }
+      }
+      if (docIds.length > 0) {
+        excludeDocuments(docIds)
+        setStatusMessage(`AI excluded ${docIds.length} boring document${docIds.length > 1 ? "s" : ""}!`)
+      } else {
+        setStatusMessage("AI scan complete: No boring documents detected!")
+      }
+    } catch (err) {
+      console.error(err)
+      setStatusMessage("Failed to scan documents.")
+    } finally {
+      setIsScanningDocs(false)
+      setTimeout(() => setStatusMessage(null), 4000)
+    }
+  }
+
   const processAndLoadFiles = async (fileList: File[]) => {
     if (fileList.length === 0) return
     setIsPreparing(true)
-    setStatusMessage("Processing media...")
+    setStatusMessage("Processing photos...")
 
     try {
-      const shuffled = fileList.sort(() => Math.random() - 0.5).slice(0, 20)
+      const imageFiles = fileList.filter((f) => f.type.startsWith("image/") || /\.(jpg|jpeg|png|webp|heic|heif)$/i.test(f.name))
+      const shuffled = imageFiles.sort(() => Math.random() - 0.5).slice(0, 20)
       const processed = await Promise.all(
         shuffled.map(async (file, idx) => {
-          const isVideo = file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
-          if (isVideo) {
-            const res = await processVideo(file)
-            return {
-              id: `local_${Date.now()}_${idx}`,
-              type: "video" as const,
-              dataUrl: res.dataUrl,
-            }
-          } else {
-            const res = await compressImage(file, 800, 0.65)
-            return {
-              id: `local_${Date.now()}_${idx}`,
-              type: "image" as const,
-              dataUrl: res.dataUrl,
-            }
+          const res = await compressImage(file, 800, 0.65)
+          return {
+            id: `local_${Date.now()}_${idx}`,
+            type: "image" as const,
+            dataUrl: res.dataUrl,
           }
         })
       )
@@ -146,10 +206,10 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       if (!isReady) {
         onToggleReady()
       }
-      setStatusMessage(`${processed.length} items loaded!`)
+      setStatusMessage(`${processed.length} photos loaded!`)
     } catch (err) {
       console.error(err)
-      setStatusMessage("Failed to process media.")
+      setStatusMessage("Failed to process photos.")
     } finally {
       setIsPreparing(false)
       setTimeout(() => setStatusMessage(null), 4000)
@@ -172,7 +232,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         const item = items[i]
         if (item.kind === "file") {
           const f = item.getAsFile()
-          if (f && (f.type.startsWith("image/") || f.type.startsWith("video/"))) {
+          if (f && f.type.startsWith("image/")) {
             extractedFiles.push(f)
           }
         }
@@ -187,7 +247,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     const clipboardFiles = e.clipboardData?.files
     if (clipboardFiles && clipboardFiles.length > 0) {
       const validFiles = Array.from(clipboardFiles).filter(
-        (f) => f.type.startsWith("image/") || f.type.startsWith("video/")
+        (f) => f.type.startsWith("image/")
       )
       if (validFiles.length > 0) {
         e.preventDefault()
@@ -491,15 +551,16 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         ref={fileInputRef}
         type="file"
         multiple
-        accept={
-          mediaType === "videos_only"
-            ? "video/*,.mp4,.mov,.m4v,.webm"
-            : mediaType === "photos_only"
-            ? "image/*,.heic,.heif"
-            : "image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm"
-        }
+        accept="image/*,.heic,.heif"
         className="hidden"
         onChange={handleFileInputChange}
+      />
+      <input
+        ref={guaranteedInputRef}
+        type="file"
+        accept="image/*,.heic,.heif"
+        className="hidden"
+        onChange={handleGuaranteedPhotoChange}
       />
 
       <div className="flex items-center justify-between pb-2 border-b border-white/10">
@@ -558,14 +619,19 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 type="button"
                 onClick={handleAndroidPick}
                 disabled={isPreparing}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left disabled:opacity-50"
+                className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
                     <Smartphone size={24} />
                   </div>
-                  <div className="font-extrabold text-white text-base">
-                    Pick 20 Random Media
+                  <div>
+                    <div className="font-extrabold text-white text-base">
+                      Pick 20 Random Photos
+                    </div>
+                    <div className="text-xs text-emerald-200/90 font-normal mt-0.5">
+                      Instantly selects 20 photos automatically
+                    </div>
                   </div>
                 </div>
                 <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
@@ -685,31 +751,53 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             <span className="text-violet-300 font-black">
               Selected Items ({approvedItems.length})
             </span>
-            <button
-              type="button"
-              onClick={() => setIsPreviewModalOpen(true)}
-              className="text-xs text-violet-400 hover:text-white flex items-center gap-1 font-bold"
-            >
-              <Eye size={14} /> Review
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExcludeDocuments}
+                disabled={isScanningDocs || items.length === 0}
+                className="text-xs bg-violet-950/60 hover:bg-violet-900/60 text-violet-300 hover:text-white px-2.5 py-1 rounded-lg flex items-center gap-1 font-bold border border-violet-500/30 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                <Sparkles size={13} className={isScanningDocs ? "animate-spin text-amber-400" : "text-violet-400"} />
+                <span>{isScanningDocs ? "Scanning..." : "Exclude Documents with AI"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsPreviewModalOpen(true)}
+                className="text-xs text-violet-400 hover:text-white flex items-center gap-1 font-bold cursor-pointer"
+              >
+                <Eye size={14} /> Review
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto p-1.5 bg-black/30 rounded-2xl border border-white/5">
             {items.map((item) => (
               <div
                 key={item.id}
-                className="relative aspect-square rounded-xl overflow-hidden group border border-white/10 bg-slate-800"
+                className={`relative aspect-square rounded-xl overflow-hidden group border bg-slate-800 ${
+                  item.isGuaranteed
+                    ? "border-amber-400/80 ring-2 ring-amber-400/50"
+                    : item.isExcluded
+                    ? "border-red-500/30 opacity-40"
+                    : "border-white/10"
+                }`}
               >
-                {item.type === "video" ? (
-                  <div className="w-full h-full flex items-center justify-center bg-violet-950/60">
-                    <PlayCircle size={20} className="text-violet-300" />
+                <img
+                  src={item.dataUrl}
+                  alt="Selected media"
+                  className="w-full h-full object-cover"
+                />
+                {item.isGuaranteed && (
+                  <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 text-[9px] font-black flex items-center gap-0.5 shadow-md">
+                    <Star size={9} className="fill-slate-950" />
+                    <span>100%</span>
                   </div>
-                ) : (
-                  <img
-                    src={item.dataUrl}
-                    alt="Selected media"
-                    className="w-full h-full object-cover"
-                  />
+                )}
+                {item.isExcluded && (
+                  <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-red-600/80 text-white text-[9px] font-bold">
+                    Excluded
+                  </div>
                 )}
                 <button
                   type="button"
@@ -735,26 +823,39 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </Button>
 
             {isAndroidDevice ? (
-              <Button
-                variant="outline"
-                size="sm"
-                fullWidth
-                onClick={handleAndroidReroll}
-                disabled={isPreparing}
-                className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-950/30 text-xs py-2"
-              >
-                <RefreshCw size={14} /> Reroll
-              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={handleAndroidReroll}
+                  disabled={isPreparing}
+                  className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-950/30 text-xs py-2"
+                >
+                  <RefreshCw size={14} /> Reroll
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => guaranteedInputRef.current?.click()}
+                  className="border-amber-500/40 text-amber-300 hover:bg-amber-950/30 text-xs py-2 font-bold"
+                >
+                  <Star size={14} className={hasGuaranteed ? "fill-amber-400 text-amber-400" : ""} />
+                  <span className="truncate">{hasGuaranteed ? "Change Guaranteed" : "1 Guaranteed Photo"}</span>
+                </Button>
+              </div>
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   variant="outline"
                   size="sm"
                   fullWidth
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-950/30 text-xs py-2"
+                  onClick={() => guaranteedInputRef.current?.click()}
+                  className="border-amber-500/40 text-amber-300 hover:bg-amber-950/30 text-xs py-2 font-bold"
                 >
-                  <ImageIcon size={14} /> Select Different
+                  <Star size={14} className={hasGuaranteed ? "fill-amber-400 text-amber-400" : ""} />
+                  <span className="truncate">{hasGuaranteed ? "Change Guaranteed" : "1 Guaranteed Photo"}</span>
                 </Button>
                 <div
                   contentEditable
