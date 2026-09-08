@@ -16,14 +16,12 @@ import {
   Trash2,
   Sparkles,
   Plus,
-  Folder,
   Film,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { DocumentScanner } from '../ml/DocumentScanner'
 import { ImagePreviewModal } from '../ml/ImagePreviewModal'
-import { CloudImportModal } from './CloudImportModal'
 import { useDocumentFilter } from '../../hooks/useDocumentFilter'
 import { isNativeApp, queryNativeCameraRoll } from '../../services/nativeMediaService'
 import {
@@ -52,7 +50,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
-  const [isCloudModalOpen, setIsCloudModalOpen] = useState(false)
   const [vaultCount, setVaultCount] = useState<number>(0)
   const [isSecretMode, setIsSecretMode] = useState<boolean>(false)
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
@@ -141,18 +138,15 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }, [mediaType])
 
-  // Handle camera roll selection: supports 50–100 photos/videos at once, saves to IndexedDB Vault, and samples 15
+  // Handle camera roll selection: supports unlimited photos/videos at once, saves to IndexedDB Vault, and samples 15
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       let filesArray = Array.from(e.target.files)
+      // Reset input value so user can select again without needing to reload
+      e.target.value = ''
 
       // Randomly shuffle all incoming files first using Fisher-Yates
       filesArray = fisherYatesShuffle(filesArray)
-
-      // Support up to 100 media items in one upload batch
-      if (filesArray.length > 100) {
-        filesArray = filesArray.slice(0, 100)
-      }
 
       // Process and filter files (downscaling + document heuristics + safety filter)
       const { accepted } = await processFiles(filesArray)
@@ -194,53 +188,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         setVaultMessage(`🎉 ${accepted.length} ${label} saved to your Vault! Total pool: ${vaultCount + accepted.length}`)
         setTimeout(() => setVaultMessage(null), 4500)
       }
-    }
-  }
-
-  // Handle folder import (local folder, Google Drive synced folder, iCloud)
-  const handleImportFolderFiles = async (files: File[]) => {
-    let filesArray = fisherYatesShuffle(files)
-    if (filesArray.length > 100) {
-      filesArray = filesArray.slice(0, 100)
-    }
-
-    const { accepted } = await processFiles(filesArray)
-    if (accepted.length > 0) {
-      await savePhotosToVault(
-        accepted.map((m) => ({
-          id: m.id,
-          type: m.type,
-          dataUrl: m.dataUrl,
-        }))
-      )
-      await refreshVaultCount()
-
-      const activeSample = await sampleRandomFromVault(15, mediaType)
-      const filteredAccepted = accepted.filter((m) =>
-        mediaType === 'videos_only' ? m.type === 'video' : mediaType === 'photos_only' ? m.type === 'image' : true
-      )
-      const finalDeck = activeSample.length > 0 ? activeSample : filteredAccepted.slice(0, 15)
-      loadExistingMedia(finalDeck)
-
-      const mapped = finalDeck.map((s) => ({
-        id: s.id,
-        ownerId: '',
-        ownerName: '',
-        type: s.type,
-        dataUrl: s.dataUrl,
-      }))
-      onMediaReady(mapped)
-
-      if (!isReady) {
-        onToggleReady()
-      }
-
-      const label = mediaType === 'videos_only' ? 'videos' : mediaType === 'photos_only' ? 'photos' : 'items'
-      setVaultMessage(`🎉 ${accepted.length} ${label} imported from folder & saved to Vault!`)
-      setTimeout(() => setVaultMessage(null), 4500)
-    } else {
-      setVaultMessage(`⚠️ No valid media could be imported from folder.`)
-      setTimeout(() => setVaultMessage(null), 4500)
     }
   }
 
@@ -511,62 +458,40 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 </span>
               </Button>
 
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-white/10 text-xs py-2 text-gray-300 hover:text-white"
-                >
-                  <Plus size={14} /> {mediaType === 'videos_only' ? 'Add Videos' : mediaType === 'photos_only' ? 'Add Photos' : 'Add Media'}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsCloudModalOpen(true)}
-                  className="border-violet-500/30 bg-violet-950/20 text-xs py-2 text-violet-300 hover:text-violet-200 hover:border-violet-500/50"
-                >
-                  <Folder size={14} /> Drive / Folder
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                fullWidth
+                onClick={() => fileInputRef.current?.click()}
+                className="border-white/10 text-xs py-2 text-gray-300 hover:text-white"
+              >
+                <Plus size={14} /> {mediaType === 'videos_only' ? '+ Add More Videos from Photo App' : mediaType === 'photos_only' ? '+ Add More Photos from Photo App' : '+ Add More Media from Photo App'}
+              </Button>
             </div>
           ) : (
             /* First Time Setup: Upload Photos/Videos into Vault */
-            <div className="space-y-2">
-              <button
-                onClick={handleCameraRollClick}
-                className="w-full p-6 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
-              >
-                <div className="w-14 h-14 rounded-2xl bg-violet-600/40 flex items-center justify-center text-violet-200 border border-violet-400/40 shadow-inner">
-                  {mediaType === 'videos_only' ? <Film size={28} className="animate-pulse" /> : <Camera size={28} className="animate-pulse" />}
+            <button
+              onClick={handleCameraRollClick}
+              className="w-full p-6 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-violet-600/40 flex items-center justify-center text-violet-200 border border-violet-400/40 shadow-inner">
+                {mediaType === 'videos_only' ? <Film size={28} className="animate-pulse" /> : <Camera size={28} className="animate-pulse" />}
+              </div>
+              <div className="text-center">
+                <div className="font-black text-white text-base">
+                  {mediaType === 'videos_only'
+                    ? '🎥 Select Videos from Photo App (No Limit)'
+                    : mediaType === 'photos_only'
+                    ? '📱 Select Photos from Photo App (No Limit)'
+                    : '✨ Select Photos & Videos from Photo App (No Limit)'}
                 </div>
-                <div className="text-center">
-                  <div className="font-black text-white text-base">
-                    {mediaType === 'videos_only'
-                      ? '🎥 Select 10–30 Videos (Upload Once)'
-                      : mediaType === 'photos_only'
-                      ? '📱 Select 50–100 Photos (Upload Once)'
-                      : '✨ Select Photos & Videos (Upload Once)'}
-                  </div>
-                  <div className="text-xs text-violet-300/80 mt-1 max-w-xs">
-                    {mediaType === 'videos_only'
-                      ? "Select videos once. Stored locally in your device's Video Vault for instant 1-tap play!"
-                      : "Swipe-select photos once. Stored locally in your browser's Photo Vault for instant 1-tap play forever!"}
-                  </div>
+                <div className="text-xs text-violet-300/80 mt-1 max-w-xs">
+                  {mediaType === 'videos_only'
+                    ? "Select videos from your photo library. Stored locally in your device's Video Vault for instant 1-tap play!"
+                    : "Select photos from your photo library. Stored locally in your browser's Photo Vault for instant 1-tap play forever!"}
                 </div>
-              </button>
-
-              <Button
-                variant="outline"
-                size="md"
-                fullWidth
-                onClick={() => setIsCloudModalOpen(true)}
-                className="border-violet-500/30 bg-violet-950/30 text-xs text-violet-200 py-3 hover:bg-violet-900/40 font-bold"
-              >
-                <Folder size={16} className="text-violet-400" />
-                <span>📂 Import from Google Drive or Folder</span>
-              </Button>
-            </div>
+              </div>
+            </button>
           )}
 
 
@@ -750,15 +675,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               <Upload size={14} /> Add
             </Button>
             <Button
-              variant="outline"
-              size="sm"
-              className="text-xs shrink-0 text-violet-300 border-violet-500/30 hover:border-violet-400"
-              onClick={() => setIsCloudModalOpen(true)}
-              title="Import photos from folder or Google Drive"
-            >
-              <Folder size={14} /> Drive / Folder
-            </Button>
-            <Button
               variant={isReady ? 'success' : 'primary'}
               size="md"
               className="flex-1 text-xs font-bold"
@@ -781,12 +697,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         onConfirm={handleConfirmReview}
       />
 
-      {/* Cloud & Drive Import Modal */}
-      <CloudImportModal
-        isOpen={isCloudModalOpen}
-        onClose={() => setIsCloudModalOpen(false)}
-        onImportFiles={handleImportFolderFiles}
-      />
     </div>
   )
 }

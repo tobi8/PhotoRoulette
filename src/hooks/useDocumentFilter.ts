@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { ExcludedMediaItem, MediaItem } from '../types/game'
-import { processMediaFile, compressImageUrl } from '../utils/imageCompression'
+import { processMediaFile } from '../utils/imageCompression'
 import { analyzeImageHeuristics } from '../utils/documentHeuristics'
 import { fisherYatesShuffle } from '../services/photoVaultService'
 
@@ -157,43 +157,6 @@ export function useDocumentFilter() {
     return foundDocuments
   }, [items])
 
-  /**
-   * Process a list of image URLs (such as Google Drive direct links) without AI scanning
-   */
-  const processUrls = useCallback(async (urlItems: Array<{ id: string; url: string; name?: string }>): Promise<MediaItem[]> => {
-    const accepted: MediaItem[] = []
-    const newItems: FilterResultItem[] = []
-
-    for (let i = 0; i < urlItems.length; i++) {
-      try {
-        const compressed = await compressImageUrl(urlItems[i].url)
-        accepted.push({
-          id: urlItems[i].id,
-          ownerId: '',
-          ownerName: '',
-          type: 'image',
-          dataUrl: compressed.dataUrl,
-          previewUrl: compressed.thumbnailUrl,
-        })
-        newItems.push({
-          id: urlItems[i].id,
-          previewUrl: compressed.thumbnailUrl,
-          dataUrl: compressed.dataUrl,
-          type: 'image',
-          reason: 'Cloud photo',
-          confidence: 0,
-          isExcluded: false,
-        })
-      } catch (err) {
-        console.error('Failed to import URL:', urlItems[i].url, err)
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-
-    setItems(newItems)
-    return accepted
-  }, [])
 
   /**
    * Allows user to un-exclude (restore) or manually exclude a photo in the review UI
@@ -321,7 +284,6 @@ export function useDocumentFilter() {
     progress,
     items,
     processFiles,
-    processUrls,
     runAiScan,
     loadExistingMedia,
     toggleExclude,
