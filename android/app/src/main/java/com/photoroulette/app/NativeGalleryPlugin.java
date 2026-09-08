@@ -3,20 +3,20 @@ package com.photoroulette.app;
 import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentUris;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.media.ExifInterface;
-import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.util.Base64;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
-import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -25,10 +25,7 @@ import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
 import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
 import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -37,11 +34,10 @@ import java.util.List;
     name = "NativeGallery",
     permissions = {
         @Permission(
-            alias = "images",
+            alias = "media",
             strings = {
                 Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO,
-                "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+                Manifest.permission.READ_MEDIA_VIDEO
             }
         ),
         @Permission(
@@ -67,16 +63,16 @@ public class NativeGalleryPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void getMedias(PluginCall call) {
+    public void pickRandom20(PluginCall call) {
         if (!hasRequiredPermissions()) {
-            requestAllPermissions(call, "permissionCallbackGetMedias");
+            requestAllPermissions(call, "permissionCallbackPickRandom20");
             return;
         }
-        processQueryAndReturn(call);
+        processRandom20(call);
     }
 
     @PluginMethod
-    public void pickRandom20(PluginCall call) {
+    public void reroll(PluginCall call) {
         if (!hasRequiredPermissions()) {
             requestAllPermissions(call, "permissionCallbackPickRandom20");
             return;
@@ -102,6 +98,20 @@ public class NativeGalleryPlugin extends Plugin {
         requestAllPermissions(call, "permissionCallbackDirectRequest");
     }
 
+    @PluginMethod
+    public void openSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            Uri uri = Uri.fromParts("package", getContext().getPackageName(), null);
+            intent.setData(uri);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
+    }
+
     @PermissionCallback
     private void permissionCallbackDirectRequest(PluginCall call) {
         JSObject res = new JSObject();
@@ -109,55 +119,31 @@ public class NativeGalleryPlugin extends Plugin {
         call.resolve(res);
     }
 
-    @PluginMethod
-    public void openSettings(PluginCall call) {
-        try {
-            android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            Uri uri = Uri.fromParts("package", getContext().getPackageName(), null);
-            intent.setData(uri);
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-            getContext().startActivity(intent);
-            call.resolve();
-        } catch (Exception e) {
-            call.reject("Failed to open app settings: " + e.getMessage());
-        }
-    }
-
-    @PermissionCallback
-    private void permissionCallbackGetMedias(PluginCall call) {
-        if (hasRequiredPermissions()) {
-            processQueryAndReturn(call);
-        } else {
-            call.reject("Permission denied to access photo gallery.");
-        }
-    }
-
     @PermissionCallback
     private void permissionCallbackPickRandom20(PluginCall call) {
         if (hasRequiredPermissions()) {
             processRandom20(call);
         } else {
-            call.reject("Permission denied to access photo gallery.");
+            call.reject("Permission denied to access gallery.");
         }
     }
 
     @Override
     public boolean hasRequiredPermissions() {
-        if (Build.VERSION.SDK_INT >= 34) {
-            boolean hasImages = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-            boolean hasVideos = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-            boolean hasPartial = getContext().checkSelfPermission("android.permission.READ_MEDIA_VISUAL_USER_SELECTED") == android.content.pm.PackageManager.PERMISSION_GRANTED;
-            return hasImages || hasVideos || hasPartial;
-        } else if (Build.VERSION.SDK_INT >= 33) {
-            boolean hasImages = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-            boolean hasVideos = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        if (Build.VERSION.SDK_INT >= 33) {
+            boolean hasImages = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED;
+            boolean hasVideos = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED;
+            if (Build.VERSION.SDK_INT >= 34) {
+                boolean hasPartial = getContext().checkSelfPermission("android.permission.READ_MEDIA_VISUAL_USER_SELECTED") == PackageManager.PERMISSION_GRANTED;
+                return hasImages || hasVideos || hasPartial;
+            }
             return hasImages || hasVideos;
         } else {
-            return getContext().checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            return getContext().checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
         }
     }
 
-    public List<MediaRef> queryAllMediaReferences(String types) {
+    private List<MediaRef> queryAllMediaReferences(String types) {
         List<MediaRef> allItems = new ArrayList<>();
         ContentResolver resolver = getContext().getContentResolver();
 
@@ -205,7 +191,7 @@ public class NativeGalleryPlugin extends Plugin {
         return allItems;
     }
 
-    public byte[] compressImage(Uri uri, int maxDimension, int quality) {
+    private byte[] compressImage(Uri uri, int maxDimension, int quality) {
         ContentResolver resolver = getContext().getContentResolver();
         InputStream is = null;
         try {
@@ -270,7 +256,7 @@ public class NativeGalleryPlugin extends Plugin {
         }
     }
 
-    public byte[] processVideo(Uri uri, int maxBytes) {
+    private byte[] processVideo(Uri uri, int maxBytes) {
         ContentResolver resolver = getContext().getContentResolver();
         try (InputStream is = resolver.openInputStream(uri)) {
             if (is == null) return null;
@@ -292,13 +278,12 @@ public class NativeGalleryPlugin extends Plugin {
         }
     }
 
-    private void processQueryAndReturn(PluginCall call) {
+    private void processRandom20(PluginCall call) {
         new Thread(() -> {
             try {
-                int quantity = call.getInt("quantity", 20);
                 String types = call.getString("types", "all");
                 List<MediaRef> allRefs = queryAllMediaReferences(types);
-                int count = Math.min(quantity, allRefs.size());
+                int count = Math.min(20, allRefs.size());
                 JSArray results = new JSArray();
 
                 for (int i = 0; i < count; i++) {
@@ -328,119 +313,8 @@ public class NativeGalleryPlugin extends Plugin {
                 res.put("medias", results);
                 call.resolve(res);
             } catch (Exception e) {
-                call.reject("Failed to query media: " + e.getMessage(), e);
+                call.reject(e.getMessage());
             }
         }).start();
-    }
-
-    private void processRandom20(PluginCall call) {
-        new Thread(() -> {
-            try {
-                String roomId = call.getString("room", "ROOM");
-                String userId = call.getString("userId", "user");
-                String uploadUrl = call.getString("uploadUrl", "");
-                String types = call.getString("types", "all");
-                List<MediaRef> allRefs = queryAllMediaReferences(types);
-                int count = Math.min(20, allRefs.size());
-
-                if (uploadUrl != null && !uploadUrl.trim().isEmpty()) {
-                    uploadToEndpoint(uploadUrl, roomId, userId, allRefs.subList(0, count), call);
-                } else {
-                    JSArray results = new JSArray();
-                    for (int i = 0; i < count; i++) {
-                        MediaRef ref = allRefs.get(i);
-                        JSObject item = new JSObject();
-                        item.put("identifier", String.valueOf(ref.id));
-                        item.put("type", ref.isVideo ? "video" : "image");
-
-                        if (ref.isVideo) {
-                            byte[] videoBytes = processVideo(ref.uri, 15 * 1024 * 1024);
-                            if (videoBytes != null && videoBytes.length > 0) {
-                                String base64 = Base64.encodeToString(videoBytes, Base64.NO_WRAP);
-                                item.put("data", "data:video/mp4;base64," + base64);
-                                results.put(item);
-                            }
-                        } else {
-                            byte[] imgBytes = compressImage(ref.uri, 1280, 75);
-                            if (imgBytes != null && imgBytes.length > 0) {
-                                String base64 = Base64.encodeToString(imgBytes, Base64.NO_WRAP);
-                                item.put("data", "data:image/jpeg;base64," + base64);
-                                results.put(item);
-                            }
-                        }
-                    }
-                    JSObject res = new JSObject();
-                    res.put("medias", results);
-                    call.resolve(res);
-                }
-            } catch (Exception e) {
-                call.reject("Error in pickRandom20: " + e.getMessage(), e);
-            }
-        }).start();
-    }
-
-    private void uploadToEndpoint(String uploadUrl, String roomId, String userId, List<MediaRef> list, PluginCall call) {
-        try {
-            String boundary = "===" + System.currentTimeMillis() + "===";
-            String endpoint = uploadUrl + (uploadUrl.contains("?") ? "&" : "?") + "room=" + roomId + "&userId=" + userId;
-            URL url = new URL(endpoint);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setDoInput(true);
-            conn.setDoOutput(true);
-            conn.setUseCaches(false);
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Connection", "Keep-Alive");
-            conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-
-            DataOutputStream dos = new DataOutputStream(conn.getOutputStream());
-
-            dos.writeBytes("--" + boundary + "\r\n");
-            dos.writeBytes("Content-Disposition: form-data; name=\"room\"\r\n\r\n" + roomId + "\r\n");
-            dos.writeBytes("--" + boundary + "\r\n");
-            dos.writeBytes("Content-Disposition: form-data; name=\"userId\"\r\n\r\n" + userId + "\r\n");
-
-            for (int i = 0; i < list.size(); i++) {
-                MediaRef ref = list.get(i);
-                String fieldName = (ref.isVideo ? "video_" : "image_") + i;
-                String filename = (ref.isVideo ? "video_" : "image_") + i + (ref.isVideo ? ".mp4" : ".jpg");
-                String mimeType = ref.isVideo ? "video/mp4" : "image/jpeg";
-
-                byte[] data = ref.isVideo
-                    ? processVideo(ref.uri, 15 * 1024 * 1024)
-                    : compressImage(ref.uri, 1280, 75);
-
-                if (data == null || data.length == 0) continue;
-
-                dos.writeBytes("--" + boundary + "\r\n");
-                dos.writeBytes("Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + filename + "\"\r\n");
-                dos.writeBytes("Content-Type: " + mimeType + "\r\n\r\n");
-                dos.write(data);
-                dos.writeBytes("\r\n");
-            }
-
-            dos.writeBytes("--" + boundary + "--\r\n");
-            dos.flush();
-            dos.close();
-
-            int responseCode = conn.getResponseCode();
-            if (responseCode >= 200 && responseCode < 300) {
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                InputStream is = conn.getInputStream();
-                byte[] buffer = new byte[4096];
-                int n;
-                while ((n = is.read(buffer)) != -1) {
-                    baos.write(buffer, 0, n);
-                }
-                String respStr = baos.toString("UTF-8");
-                JSObject res = new JSObject();
-                res.put("success", true);
-                res.put("response", respStr);
-                call.resolve(res);
-            } else {
-                call.reject("Upload HTTP Error: " + responseCode);
-            }
-        } catch (Exception e) {
-            call.reject("Upload failed: " + e.getMessage(), e);
-        }
     }
 }
