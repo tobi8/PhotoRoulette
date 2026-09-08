@@ -40,7 +40,8 @@ import java.util.List;
             alias = "images",
             strings = {
                 Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO
+                Manifest.permission.READ_MEDIA_VIDEO,
+                "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
             }
         ),
         @Permission(
@@ -106,6 +107,20 @@ public class NativeGalleryPlugin extends Plugin {
         JSObject res = new JSObject();
         res.put("granted", hasRequiredPermissions());
         call.resolve(res);
+    }
+
+    @PluginMethod
+    public void openSettings(PluginCall call) {
+        try {
+            android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            Uri uri = Uri.fromParts("package", getContext().getPackageName(), null);
+            intent.setData(uri);
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to open app settings: " + e.getMessage());
+        }
     }
 
     @PermissionCallback

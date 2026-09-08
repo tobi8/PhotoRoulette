@@ -33,6 +33,7 @@ interface NativeGalleryPlugin {
   }>
   checkGalleryPermission(): Promise<{ granted: boolean }>
   requestGalleryPermission(): Promise<{ granted: boolean }>
+  openSettings(): Promise<void>
 }
 
 const AndroidGallery = registerPlugin<NativeGalleryPlugin>('NativeGallery')
@@ -90,6 +91,14 @@ export async function requestAndroidGalleryPermission(): Promise<boolean> {
     }
   } catch {}
   return true
+}
+
+export async function openAndroidAppSettings(): Promise<void> {
+  try {
+    if (Capacitor.isPluginAvailable('NativeGallery')) {
+      await AndroidGallery.openSettings()
+    }
+  } catch {}
 }
 
 export async function pickRandom20Android(

@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from "react"
+import React, { useState, useMemo, useRef, useEffect } from "react"
 import {
   Smartphone,
-  Send,
-  Download,
+  Clipboard,
+  Image as ImageIcon,
   RotateCw,
   Check,
   Sparkles,
@@ -16,12 +16,12 @@ import { Badge } from "../ui/Badge"
 import { ImagePreviewModal } from "../ml/ImagePreviewModal"
 import { useDocumentFilter } from "../../hooks/useDocumentFilter"
 import {
-  isAndroid,
   hasAndroidBridge,
   pickRandom20Android,
   requestAndroidGalleryPermission,
+  openAndroidAppSettings,
 } from "../../services/nativeMediaService"
-import { getOrCreateDeviceId } from "../../utils/deviceId"
+import { compressImage, processVideo } from "../../utils/imageCompression"
 
 interface MediaUploaderProps {
   onMediaReady: (mediaItems: Array<{ id: string; type: "image" | "video"; dataUrl: string }>) => void
@@ -30,25 +30,6 @@ interface MediaUploaderProps {
   mediaType?: "photos_only" | "videos_only" | "mixed"
   roomId?: string
   userId?: string
-  workerUrl?: string
-}
-
-const SHORTCUT_LINKS: Record<string, { name: string; url: string; label: string }> = {
-  photos_only: {
-    name: "PhotoRouletteUpload",
-    url: "https://www.icloud.com/shortcuts/bb1707211c824566ab3e70263be68c57",
-    label: "Photos",
-  },
-  videos_only: {
-    name: "PhotoRouletteUpload(Videos)",
-    url: "https://www.icloud.com/shortcuts/84b4fa92547643efba2a581f15ddfd94",
-    label: "Videos",
-  },
-  mixed: {
-    name: "PhotoRouletteUpload(Mixed)",
-    url: "https://www.icloud.com/shortcuts/fb672669f9364dc2acfffcd770067137",
-    label: "Mixed",
-  },
 }
 
 export const MediaUploader: React.FC<MediaUploaderProps> = ({
@@ -58,21 +39,14 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   mediaType = "mixed",
   roomId = "DEFAULT_ROOM",
   userId = "anonymous",
-  workerUrl = "https://photoroulette-worker.thomasblthsr.workers.dev",
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [isPreparing, setIsPreparing] = useState(false)
-  const [isWaitingForShortcut, setIsWaitingForShortcut] = useState(false)
   const [permissionDenied, setPermissionDenied] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
-  const pollingRef = useRef<any>(null)
 
-  const effectiveUserId = useMemo(() => {
-    return getOrCreateDeviceId()
-  }, [])
-
-  const isAndroidDevice = useMemo(() => isAndroid(), [])
-  const activeShortcut = SHORTCUT_LINKS[mediaType] || SHORTCUT_LINKS.mixed
+  const isNativeAndroid = useMemo(() => hasAndroidBridge(), [])
 
   const {
     items,
@@ -82,91 +56,126 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     getApprovedMedia,
   } = useDocumentFilter()
 
-  const checkWorkerMedia = useCallback(async () => {
+  // Listen for global Ctrl+V / Cmd+V paste events
+  useEffect(() => {
+    const handleGlobalPaste = async (e: ClipboardEvent) => {
+      const clipboardItems = e.clipboardData?.items
+      if (!clipboardItems || clipboardItems.length === 0) return
+
+      const files: File[] = []
+      for (let i = 0; i < clipboardItems.length; i++) {
+        if (clipboardItems[i].type.startsWith("image/")) {
+          const file = clipboardItems[i].getAsFile()
+          if (file) files.push(file)
+        }
+      }
+
+      if (files.length > 0) {
+        e.preventDefault()
+        await processAndLoadFiles(files)
+      }
+    }
+
+    window.addEventListener("paste", handleGlobalPaste)
+    return () => window.removeEventListener("paste", handleGlobalPaste)
+  }, [items, isReady, onMediaReady, onToggleReady, loadExistingMedia])
+
+  // Process a list of File objects locally with Canvas GPU compression
+  const processAndLoadFiles = async (fileList: File[]) => {
+    if (fileList.length === 0) return
+    setIsPreparing(true)
+    setStatusMessage(`⚡ Loading ${fileList.length} items on device...`)
+
     try {
-      const response = await fetch(
-        `${workerUrl}/media?room=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(effectiveUserId)}`
+      // Pick up to 20 random items if more than 20 were selected
+      const shuffled = fileList.sort(() => Math.random() - 0.5).slice(0, 20)
+
+      const processed = await Promise.all(
+        shuffled.map(async (file, idx) => {
+          const isVideo = file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
+          if (isVideo) {
+            const res = await processVideo(file)
+            return {
+              id: `local_${Date.now()}_${idx}`,
+              type: "video" as const,
+              dataUrl: res.dataUrl,
+            }
+          } else {
+            const res = await compressImage(file, 800, 0.65)
+            return {
+              id: `local_${Date.now()}_${idx}`,
+              type: "image" as const,
+              dataUrl: res.dataUrl,
+            }
+          }
+        })
       )
-      if (response.ok) {
-        const data = await response.json()
-        if (data.items && data.items.length > 0) {
-          if (pollingRef.current) {
-            clearInterval(pollingRef.current)
-            pollingRef.current = null
-          }
-          setIsWaitingForShortcut(false)
 
-          const mapped = data.items.map((i: { id: string; type: "image" | "video"; url: string }) => ({
-            id: i.id,
-            type: i.type,
-            dataUrl: i.url,
-          }))
-
-          loadExistingMedia(mapped)
-          onMediaReady(mapped)
-
-          try {
-            sessionStorage.setItem(`pr_media_${roomId}_${effectiveUserId}`, JSON.stringify(mapped))
-          } catch {}
-
-          if (!isReady) {
-            onToggleReady()
-          }
-
-          setStatusMessage(`🎉 ${mapped.length} items loaded!`)
-          setTimeout(() => setStatusMessage(null), 4000)
-          return true
-        }
+      loadExistingMedia(processed)
+      onMediaReady(processed)
+      if (!isReady) {
+        onToggleReady()
       }
-    } catch {}
-    return false
-  }, [roomId, effectiveUserId, workerUrl, isReady, onToggleReady, onMediaReady, loadExistingMedia])
+      setStatusMessage(`🎉 ${processed.length} items loaded instantly! (0s upload)`)
+    } catch (err) {
+      console.error("Processing error:", err)
+      setStatusMessage("Failed to process media files.")
+    } finally {
+      setIsPreparing(false)
+      setTimeout(() => setStatusMessage(null), 4000)
+    }
+  }
 
-  // Restore cached media on mount
-  useEffect(() => {
+  // Handle direct file input change (<input type="file">)
+  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    const fileArray = Array.from(files)
+    e.target.value = ""
+    await processAndLoadFiles(fileArray)
+  }
+
+  // Handle clipboard paste button (navigator.clipboard.read())
+  const handlePasteFromClipboard = async () => {
+    setIsPreparing(true)
+    setStatusMessage("Reading photos from clipboard...")
     try {
-      const cachedRaw = sessionStorage.getItem(`pr_media_${roomId}_${effectiveUserId}`)
-      if (cachedRaw) {
-        const cached = JSON.parse(cachedRaw)
-        if (Array.isArray(cached) && cached.length > 0) {
-          loadExistingMedia(cached)
-          onMediaReady(cached)
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        setStatusMessage("Clipboard API not supported in this browser. Use 'Select from Library'.")
+        setIsPreparing(false)
+        return
+      }
+
+      const clipboardItems = await navigator.clipboard.read()
+      const files: File[] = []
+
+      for (let i = 0; i < clipboardItems.length; i++) {
+        const item = clipboardItems[i]
+        for (const type of item.types) {
+          if (type.startsWith("image/")) {
+            const blob = await item.getType(type)
+            const ext = type.split("/")[1] || "jpg"
+            files.push(new File([blob], `pasted_${i}.${ext}`, { type }))
+            break
+          }
         }
       }
-    } catch {}
 
-    // Also check worker immediately on mount
-    checkWorkerMedia()
-  }, [roomId, effectiveUserId, checkWorkerMedia, loadExistingMedia, onMediaReady])
-
-  // Check immediately when switching back into the browser from the Shortcuts app
-  useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        checkWorkerMedia()
+      if (files.length === 0) {
+        setStatusMessage("⚠️ No photos on clipboard! In Photos app: Select photos → Share → Copy.")
+        setIsPreparing(false)
+        return
       }
-    }
-    document.addEventListener("visibilitychange", handleVisibility)
-    window.addEventListener("focus", handleVisibility)
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibility)
-      window.removeEventListener("focus", handleVisibility)
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current)
-      }
-    }
-  }, [checkWorkerMedia])
 
-  const approvedItems = useMemo(() => {
-    let list = items.filter((i) => !i.isExcluded)
-    if (mediaType === "videos_only") {
-      list = list.filter((i) => i.type === "video")
-    } else if (mediaType === "photos_only") {
-      list = list.filter((i) => i.type === "image")
+      await processAndLoadFiles(files)
+    } catch (err: any) {
+      console.warn("Clipboard read error:", err)
+      setStatusMessage("Clipboard access denied or empty. Tap allow or copy photos from Photos app first.")
+      setIsPreparing(false)
     }
-    return list
-  }, [items, mediaType])
+  }
 
+  // Android Native 1-Tap pick (only inside APK)
   const handleAndroidNativePick20 = async () => {
     setIsPreparing(true)
     setPermissionDenied(false)
@@ -180,12 +189,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         return
       }
 
-      const assets = await pickRandom20Android(
-        roomId,
-        effectiveUserId,
-        `${workerUrl}/upload`,
-        mediaType
-      )
+      const assets = await pickRandom20Android(roomId, userId, "", mediaType)
       if (assets && assets.length > 0) {
         const mapped = assets.map((a, idx) => ({
           id: a.id || String(idx),
@@ -194,21 +198,12 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         }))
         loadExistingMedia(mapped)
         onMediaReady(mapped)
-        try {
-          sessionStorage.setItem(`pr_media_${roomId}_${effectiveUserId}`, JSON.stringify(mapped))
-        } catch {}
         if (!isReady) {
           onToggleReady()
         }
-        setStatusMessage("🎉 20 items picked from Android device!")
+        setStatusMessage(`🎉 ${mapped.length} items picked from Android device!`)
       } else {
-        const found = await checkWorkerMedia()
-        if (found) {
-          setStatusMessage("🎉 20 items loaded!")
-        } else {
-          setPermissionDenied(true)
-          setStatusMessage("No media returned or gallery permission required.")
-        }
+        setStatusMessage("No media returned from device.")
       }
     } catch (e: any) {
       console.error("Android media pick error:", e)
@@ -220,43 +215,15 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
-  const startPollingWorkerForMedia = () => {
-    setIsWaitingForShortcut(true)
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current)
+  const approvedItems = useMemo(() => {
+    let list = items.filter((i) => !i.isExcluded)
+    if (mediaType === "videos_only") {
+      list = list.filter((i) => i.type === "video")
+    } else if (mediaType === "photos_only") {
+      list = list.filter((i) => i.type === "image")
     }
-
-    let attempts = 0
-    const maxAttempts = 60
-
-    pollingRef.current = setInterval(async () => {
-      attempts++
-      const found = await checkWorkerMedia()
-      if (found || attempts >= maxAttempts) {
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current)
-          pollingRef.current = null
-        }
-        setIsWaitingForShortcut(false)
-      }
-    }, 2000)
-  }
-
-  const handleIOSShortcutTrigger = () => {
-    const uploadEndpoint = `${workerUrl}/upload?room=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(effectiveUserId)}`
-    const payload = encodeURIComponent(
-      JSON.stringify({
-        room: roomId,
-        userId: effectiveUserId,
-        endpoint: uploadEndpoint,
-      })
-    )
-    const shortcutName = encodeURIComponent(activeShortcut.name)
-      .replace(/\(/g, "%28")
-      .replace(/\)/g, "%29")
-    window.location.href = `shortcuts://run-shortcut?name=${shortcutName}&input=text&text=${payload}`
-    startPollingWorkerForMedia()
-  }
+    return list
+  }, [items, mediaType])
 
   const handleRemoveSingle = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -274,24 +241,38 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   return (
     <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl space-y-4">
+      {/* Hidden native file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={
+          mediaType === "videos_only"
+            ? "video/*,.mp4,.mov,.m4v,.webm"
+            : mediaType === "photos_only"
+            ? "image/*,.heic,.heif"
+            : "image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm"
+        }
+        className="hidden"
+        onChange={handleFileInputChange}
+      />
+
       <div className="flex items-center justify-between pb-2 border-b border-white/10">
         <div>
           <h3 className="font-bold text-white text-base flex items-center gap-2">
-            <span>{isAndroidDevice ? "Device Gallery" : activeShortcut.label} Media Setup</span>
+            <span>Photo Setup</span>
             <span className="text-xl">
               {mediaType === "videos_only" ? "🎥" : mediaType === "photos_only" ? "📸" : "✨"}
             </span>
           </h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            {isAndroidDevice
-              ? "Auto-pick 20 random items from your gallery"
-              : "Auto-pick 20 random items via iOS Shortcut"}
+            Instant local loading • Zero network upload • 100% private
           </p>
         </div>
 
         {items.length > 0 && (
           <Badge variant="success" size="md">
-            {approvedItems.length} Loaded
+            {approvedItems.length} Ready
           </Badge>
         )}
       </div>
@@ -303,8 +284,8 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               <RotateCw size={18} className="text-violet-400 animate-spin" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Preparing random media...</div>
-              <div className="text-xs text-gray-400">Loading 20 random items from gallery...</div>
+              <div className="text-sm font-bold text-white">Preparing your media...</div>
+              <div className="text-xs text-gray-400">Processing on device in milliseconds...</div>
             </div>
           </div>
         </div>
@@ -317,21 +298,10 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         </div>
       )}
 
-      {!isAndroidDevice && isWaitingForShortcut && (
-        <div className="p-3.5 rounded-2xl bg-blue-950/60 border border-blue-500/40 flex items-center gap-2.5 text-xs text-blue-200 animate-pulse shadow-lg">
-          <RotateCw size={16} className="animate-spin text-blue-400 shrink-0" />
-          <div className="flex-1">
-            <div className="font-bold">Waiting for iOS Shortcut...</div>
-            <div className="text-[11px] text-blue-300/80">
-              {activeShortcut.name} is uploading 20 items to room {roomId}
-            </div>
-          </div>
-        </div>
-      )}
-
       {items.length === 0 ? (
         <div className="space-y-3">
-          {isAndroidDevice ? (
+          {/* OPTION 1: Android Native Button (Only inside APK) */}
+          {isNativeAndroid && (
             <>
               {permissionDenied && (
                 <div className="p-3.5 rounded-2xl bg-amber-950/60 border border-amber-500/40 text-xs text-amber-200 flex items-center justify-between gap-3 animate-in fade-in duration-200">
@@ -339,13 +309,22 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                     <ShieldCheck size={18} className="text-amber-400 shrink-0" />
                     <span>Gallery permission is required to access your photos.</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleAndroidNativePick20}
-                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-lg text-xs transition-colors shrink-0 cursor-pointer"
-                  >
-                    Grant Access
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleAndroidNativePick20}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-lg text-xs transition-colors shrink-0 cursor-pointer"
+                    >
+                      Grant Access
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openAndroidAppSettings}
+                      className="px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-white font-medium rounded-lg text-xs transition-colors shrink-0 cursor-pointer"
+                    >
+                      Settings
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -361,14 +340,10 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                   </div>
                   <div>
                     <div className="font-extrabold text-white text-base">
-                      {mediaType === "videos_only"
-                        ? "⚡ Pick 20 Random Videos"
-                        : mediaType === "photos_only"
-                        ? "⚡ Pick 20 Random Photos"
-                        : "⚡ Pick 20 Random Items"}
+                      ⚡ 1-Tap Pick 20 from Gallery
                     </div>
                     <div className="text-xs text-emerald-200/90 font-normal mt-0.5">
-                      Direct 1-tap random pick from device gallery
+                      Direct random pick on device • Instant
                     </div>
                   </div>
                 </div>
@@ -377,56 +352,67 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 </span>
               </button>
             </>
-          ) : (
-            <>
-              {/* Button 1: Automatically triggers shortcut */}
-              <button
-                type="button"
-                onClick={handleIOSShortcutTrigger}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-blue-950/40 active:scale-98 text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                    <Send size={22} />
-                  </div>
-                  <div>
-                    <div className="font-extrabold text-white text-base">
-                      📲 Import 20 via iOS Shortcut
-                    </div>
-                    <div className="text-xs text-blue-200/90 font-normal mt-0.5">
-                      Auto-picks 20 random {activeShortcut.label.toLowerCase()} on iPhone
-                    </div>
-                  </div>
-                </div>
-                <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-bold shrink-0">
-                  Run
-                </span>
-              </button>
-
-              {/* Button 2: Installs shortcut */}
-              <a
-                href={activeShortcut.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full p-3.5 rounded-2xl bg-violet-950/40 hover:bg-violet-900/50 border border-violet-500/30 text-violet-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98 shadow-md cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-violet-600/25 border border-violet-400/30 flex items-center justify-center text-violet-300 shrink-0">
-                    <Download size={18} />
-                  </div>
-                  <div>
-                    <div className="font-bold text-white text-sm">📥 Install Apple Shortcut</div>
-                    <div className="text-[11px] text-violet-300/70 font-normal mt-0.5">
-                      Add &ldquo;{activeShortcut.name}&rdquo; to your Shortcuts
-                    </div>
-                  </div>
-                </div>
-                <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold shrink-0">
-                  {activeShortcut.label}
-                </span>
-              </a>
-            </>
           )}
+
+          {/* OPTION 2: 📋 Instant Paste from Clipboard (iOS & Web) */}
+          <button
+            type="button"
+            onClick={handlePasteFromClipboard}
+            disabled={isPreparing}
+            className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-blue-950/40 active:scale-98 text-left disabled:opacity-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                <Clipboard size={24} />
+              </div>
+              <div>
+                <div className="font-extrabold text-white text-base">
+                  📋 Paste 20 Photos from Clipboard
+                </div>
+                <div className="text-xs text-blue-200/90 font-normal mt-0.5">
+                  Copy photos in Photos app → Tap here • 0s upload
+                </div>
+              </div>
+            </div>
+            <span className="text-xs bg-white/20 text-white px-3 py-1.5 rounded-full font-bold shrink-0">
+              Paste
+            </span>
+          </button>
+
+          {/* OPTION 3: 📱 Select from Library (Direct in Safari/Chrome) */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isPreparing}
+            className="w-full p-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98 cursor-pointer disabled:opacity-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-violet-600/30 border border-violet-400/30 flex items-center justify-center text-violet-300 shrink-0">
+                <ImageIcon size={18} />
+              </div>
+              <div>
+                <div className="font-bold text-white text-sm">📱 Select from Photo Library</div>
+                <div className="text-[11px] text-gray-400 font-normal mt-0.5">
+                  Choose photos or album • Auto-picks 20 random items
+                </div>
+              </div>
+            </div>
+            <span className="text-[10px] bg-white/10 text-gray-300 px-2.5 py-1 rounded-full font-bold shrink-0">
+              Browse
+            </span>
+          </button>
+
+          {/* Helpful 3-Step Shortcut tip for iOS users */}
+          <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-white/5 text-[11px] text-gray-400 space-y-1.5">
+            <div className="font-bold text-violet-300 flex items-center gap-1.5 text-xs">
+              <span>💡 For 100% Random 20 Photos on iPhone:</span>
+            </div>
+            <ol className="list-decimal list-inside space-y-0.5 text-gray-300">
+              <li>In Apple Shortcuts: <b>Find Photos</b> (Random, Limit 20)</li>
+              <li>Add action: <b>Copy to Clipboard</b></li>
+              <li>Switch back here & tap <b>Paste</b> above!</li>
+            </ol>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -477,7 +463,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
           <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/10 text-xs text-gray-300 flex items-center gap-2">
             <ShieldCheck size={16} className="shrink-0 text-emerald-400" />
-            <span>20 items ready. Screenshots and receipts filtered out automatically.</span>
+            <span>{approvedItems.length} items ready. All stored locally on your device.</span>
           </div>
 
           <div className="space-y-2 pt-1">
@@ -493,27 +479,24 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </Button>
 
             <div className="flex gap-2">
-              {isAndroidDevice ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  fullWidth
-                  onClick={handleAndroidNativePick20}
-                  className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-950/30 text-xs py-2"
-                >
-                  <Smartphone size={14} /> ⚡ Pick 20 Again
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  fullWidth
-                  onClick={handleIOSShortcutTrigger}
-                  className="border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs py-2"
-                >
-                  <Send size={14} /> 📲 Re-run Shortcut
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                size="sm"
+                fullWidth
+                onClick={() => fileInputRef.current?.click()}
+                className="border-white/10 text-gray-300 hover:text-white text-xs py-2"
+              >
+                <ImageIcon size={14} /> Add More Photos
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                fullWidth
+                onClick={handlePasteFromClipboard}
+                className="border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs py-2"
+              >
+                <Clipboard size={14} /> Paste New
+              </Button>
             </div>
           </div>
         </div>
@@ -530,4 +513,3 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     </div>
   )
 }
-
