@@ -75,12 +75,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     try {
       sessionStorage.setItem("pending_paste", "true")
       setIsPendingPaste(true)
-      const currentOrigin = window.location.origin
-      const currentPath = window.location.pathname
-      const effectiveRoom = roomId || "ROOM"
-      const effectiveUser = userId || "USER"
-      const returnUrl = `${currentOrigin}${currentPath}?room=${encodeURIComponent(effectiveRoom)}&user=${encodeURIComponent(effectiveUser)}&source=shortcut#${encodeURIComponent(effectiveRoom)}`
-      const shortcutUrl = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&input=text&text=${encodeURIComponent(returnUrl)}`
+      const shortcutUrl = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}`
       window.location.href = shortcutUrl
     } catch (err) {
       console.error(err)
@@ -189,7 +184,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   const sanitizeBase64String = (str: string): string => {
     let cleaned = str.trim()
-    cleaned = cleaned.replace(/^['"]|['"]$/g, "")
+    cleaned = cleaned.replace(/^['"]+|['"]+$/g, "")
     cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, "")
 
     let mime = "image/jpeg"
@@ -237,16 +232,18 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       while (searchIdx < trimmed.length) {
         const found = trimmed.indexOf("data:image", searchIdx)
         if (found === -1) break
+        const nextData = trimmed.indexOf("data:image", found + 10)
         let endIdx = trimmed.indexOf('"', found)
         const singleQuoteEnd = trimmed.indexOf("'", found)
         const newlineEnd = trimmed.indexOf("\n", found)
 
-        let candidateEnd = trimmed.length
+        let candidateEnd = nextData !== -1 ? nextData : trimmed.length
         if (endIdx !== -1 && endIdx < candidateEnd) candidateEnd = endIdx
         if (singleQuoteEnd !== -1 && singleQuoteEnd < candidateEnd) candidateEnd = singleQuoteEnd
         if (newlineEnd !== -1 && newlineEnd < candidateEnd) candidateEnd = newlineEnd
 
-        const segment = trimmed.substring(found, candidateEnd)
+        let segment = trimmed.substring(found, candidateEnd).trim()
+        if (segment.endsWith(",")) segment = segment.slice(0, -1).trim()
         if (segment.length > 50) {
           rawCandidates.push(segment)
         }
@@ -255,11 +252,11 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
 
     if (rawCandidates.length === 0) {
-      const lines = trimmed.split(/[\r\n]+/)
-      for (const line of lines) {
-        const trimmedLine = line.trim()
-        if (trimmedLine.length > 50) {
-          rawCandidates.push(trimmedLine)
+      const parts = trimmed.includes("\n") ? trimmed.split(/[\r\n]+/) : trimmed.split(",")
+      for (const part of parts) {
+        const trimmedPart = part.trim()
+        if (trimmedPart.length > 50) {
+          rawCandidates.push(trimmedPart)
         }
       }
     }
