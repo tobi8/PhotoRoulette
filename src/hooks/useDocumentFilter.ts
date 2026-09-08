@@ -1,167 +1,30 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { ExcludedMediaItem, MediaItem } from '../types/game'
-import { processMediaFile } from '../utils/imageCompression'
-import { analyzeImageHeuristics } from '../utils/documentHeuristics'
-import { fisherYatesShuffle } from '../services/photoVaultService'
-
-const DOCUMENT_KEYWORDS = [
-  'document',
-  'receipt',
-  'invoice',
-  'screenshot',
-  'paper',
-  'page',
-  'letter',
-  'text',
-  'form',
-  'passport',
-  'identification',
-  'credit card',
-  'bill',
-  'menu',
-  'contract',
-  'check',
-  'ticket',
-]
-
-export interface ScanProgress {
-  current: number
-  total: number
-  status: string
-}
 
 export type FilterResultItem = ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }
 
 export function useDocumentFilter() {
-  const [isScanning, setIsScanning] = useState(false)
-  const [progress, setProgress] = useState<ScanProgress>({ current: 0, total: 0, status: '' })
   const [items, setItems] = useState<FilterResultItem[]>([])
 
   /**
-   * Process uploaded files with automatic AI document analysis (always ultra-fast turbo mode)
+   * Loads media items (e.g. from iOS Shortcut or Android bridge) directly into state
    */
-  const processFiles = useCallback(async (
-    files: File[],
-    options?: { turbo?: boolean }
-  ): Promise<{
-    accepted: MediaItem[]
-    excluded: ExcludedMediaItem[]
-  }> => {
-    setIsScanning(true)
-    setProgress({ current: 0, total: files.length, status: '⚡ Initializing fast scan...' })
-
-    const results: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
-
-    // Always use turbo: process 4 files concurrently with ultra-light compression
-    const BATCH_SIZE = 4
-    const compressionOpts = { maxDim: 480, quality: 0.45 }
-
-    for (let i = 0; i < files.length; i += BATCH_SIZE) {
-      const batch = files.slice(i, i + BATCH_SIZE)
-      setProgress({
-        current: Math.min(i + batch.length, files.length),
-        total: files.length,
-        status: `⚡ Processing (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
-      })
-
-      const batchResults = await Promise.all(
-        batch.map(async (file, batchIdx) => {
-          const fileIndex = i + batchIdx
-          try {
-            // 1. Compress media to lightweight JPEG
-            const compressed = await processMediaFile(file, compressionOpts)
-
-            // 2. Run instant Canvas Heuristic AI analysis
-            const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl, file.name)
-            const isFlagged = compressed.type !== 'video' && heuristic.isDocument && heuristic.confidence >= 0.90
-            const reason = isFlagged ? heuristic.reason : 'Verified safe photo'
-
-            return {
-              id: `media-${Date.now()}-${fileIndex}-${Math.random().toString(36).slice(2, 6)}`,
-              file,
-              previewUrl: compressed.thumbnailUrl,
-              dataUrl: compressed.dataUrl,
-              type: compressed.type,
-              reason,
-              confidence: heuristic.confidence,
-              isExcluded: isFlagged,
-            }
-          } catch (err) {
-            console.error(`Error processing file ${file.name}:`, err)
-            return null
-          }
-        })
+  const loadExistingMedia = useCallback(
+    (mediaItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string }>) => {
+      setItems(
+        mediaItems.map((item) => ({
+          id: item.id,
+          previewUrl: item.previewUrl || item.dataUrl,
+          dataUrl: item.dataUrl,
+          type: item.type,
+          reason: 'Loaded via shortcut',
+          confidence: 0,
+          isExcluded: false,
+        }))
       )
-
-      for (const res of batchResults) {
-        if (res) results.push(res)
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 15))
-    }
-
-    setItems(results)
-    setIsScanning(false)
-    setProgress({ current: files.length, total: files.length, status: 'Scan complete!' })
-
-    const accepted: MediaItem[] = results
-      .filter((item) => !item.isExcluded)
-      .map((item) => ({
-        id: item.id,
-        ownerId: '',
-        ownerName: '',
-        type: item.type,
-        dataUrl: item.dataUrl,
-        previewUrl: item.previewUrl,
-      }))
-
-    const excluded: ExcludedMediaItem[] = results.filter((item) => item.isExcluded)
-
-    return { accepted, excluded }
-  }, [])
-
-  /**
-   * Manually run AI document analysis only when explicitly requested by the user
-   */
-  const runAiScan = useCallback(async (): Promise<number> => {
-    if (items.length === 0) return 0
-    setIsScanning(true)
-    setProgress({ current: 0, total: items.length, status: 'Scanning photos for documents...' })
-
-    let foundDocuments = 0
-    const updatedItems: FilterResultItem[] = []
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]
-      setProgress({
-        current: i + 1,
-        total: items.length,
-        status: `Checking photo ${i + 1} of ${items.length}...`,
-      })
-
-      try {
-        const heuristic = await analyzeImageHeuristics(item.previewUrl || item.dataUrl, item.file?.name)
-        const isDoc = item.type !== 'video' && heuristic.isDocument && heuristic.confidence >= 0.90
-        if (isDoc) foundDocuments++
-        updatedItems.push({
-          ...item,
-          isExcluded: isDoc,
-          reason: isDoc ? heuristic.reason : 'Verified photo',
-          confidence: heuristic.confidence,
-        })
-      } catch {
-        updatedItems.push(item)
-      }
-
-      await new Promise((r) => setTimeout(r, 10))
-    }
-
-    setItems(updatedItems)
-    setIsScanning(false)
-    setProgress({ current: items.length, total: items.length, status: 'Document scan complete!' })
-    return foundDocuments
-  }, [items])
-
+    },
+    []
+  )
 
   /**
    * Allows user to un-exclude (restore) or manually exclude a photo in the review UI
@@ -184,121 +47,13 @@ export function useDocumentFilter() {
    */
   const clearPhotos = useCallback(() => {
     setItems([])
-    setProgress({ current: 0, total: 0, status: '' })
-  }, [])
-
-  /**
-   * Load mock demo photos (including one mock receipt) with automatic AI scan
-   */
-  const loadMockPhotosWithTestDocument = useCallback(
-    async (mediaType: 'photos_only' | 'videos_only' | 'mixed' = 'mixed') => {
-      setIsScanning(true)
-      setProgress({ current: 0, total: 6, status: 'Generating demo party deck...' })
-
-      const { getMockPartyPhotos, getMockPartyVideos, getMockPartyDeck, generateMockPhoto } = await import(
-        '../utils/mockData'
-      )
-
-      let partyItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string }> = []
-      if (mediaType === 'videos_only') {
-        partyItems = getMockPartyVideos()
-      } else if (mediaType === 'photos_only') {
-        partyItems = getMockPartyPhotos().slice(0, 5)
-      } else {
-        partyItems = getMockPartyDeck('mixed').slice(0, 6)
-      }
-
-      // Generate one simulated receipt for photo/mixed modes
-      const mockReceipt: { id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string } | null =
-        mediaType !== 'videos_only'
-          ? {
-              id: `mock-doc-${Date.now()}`,
-              type: 'image' as const,
-              dataUrl: generateMockPhoto('Mock Receipt', '#ffffff', '🧾', true),
-              previewUrl: generateMockPhoto('Mock Receipt', '#ffffff', '🧾', true),
-            }
-          : null
-
-      const allToScan = mockReceipt ? [...partyItems, mockReceipt] : [...partyItems]
-      const scanned: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
-
-      for (let i = 0; i < allToScan.length; i++) {
-        const item = allToScan[i]
-        setProgress({
-          current: i + 1,
-          total: allToScan.length,
-          status: `Analyzing media ${i + 1} of ${allToScan.length}...`,
-        })
-        const heuristic =
-          item.type === 'video'
-            ? { isDocument: false, confidence: 0, reason: 'Video party clip' }
-            : await analyzeImageHeuristics(item.dataUrl)
-
-        scanned.push({
-          id: item.id,
-          previewUrl: item.previewUrl || item.dataUrl,
-          dataUrl: item.dataUrl,
-          type: item.type,
-          reason: heuristic.isDocument
-            ? 'Store receipt / invoice automatically detected by document scanner'
-            : 'Verified safe photo',
-          confidence: heuristic.confidence,
-          isExcluded: heuristic.isDocument,
-        })
-      }
-
-      setItems(scanned)
-      setIsScanning(false)
-      setProgress({ current: allToScan.length, total: allToScan.length, status: 'Demo pack loaded!' })
-    },
-    []
-  )
-
-  /**
-   * Loads pre-approved photos/videos (e.g. from local Persistent Vault) directly into state
-   */
-  const loadExistingMedia = useCallback(
-    (mediaItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string }>) => {
-      setItems(
-        mediaItems.map((item) => ({
-          id: item.id,
-          previewUrl: item.previewUrl || item.dataUrl,
-          dataUrl: item.dataUrl,
-          type: item.type,
-          reason: 'Loaded from local vault',
-          confidence: 0,
-          isExcluded: false,
-        }))
-      )
-    },
-    []
-  )
-
-  /**
-   * Reroll: Shuffles items in current deck using uniform Fisher-Yates
-   */
-  const rerollDeck = useCallback(() => {
-    setItems((prev) => fisherYatesShuffle(prev))
   }, [])
 
   const acceptedCount = items.filter((i) => !i.isExcluded).length
   const excludedCount = items.filter((i) => i.isExcluded).length
 
-  return {
-    isScanning,
-    progress,
-    items,
-    processFiles,
-    runAiScan,
-    loadExistingMedia,
-    toggleExclude,
-    removePhoto,
-    clearPhotos,
-    loadMockPhotosWithTestDocument,
-    rerollDeck,
-    acceptedCount,
-    excludedCount,
-    getApprovedMedia: (mediaType?: 'photos_only' | 'videos_only' | 'mixed'): MediaItem[] => {
+  const getApprovedMedia = useCallback(
+    (mediaType?: 'photos_only' | 'videos_only' | 'mixed'): MediaItem[] => {
       let unexcluded = items.filter((i) => !i.isExcluded)
       if (mediaType === 'videos_only') {
         unexcluded = unexcluded.filter((i) => i.type === 'video')
@@ -313,5 +68,17 @@ export function useDocumentFilter() {
         dataUrl: i.dataUrl,
       }))
     },
+    [items]
+  )
+
+  return {
+    items,
+    loadExistingMedia,
+    toggleExclude,
+    removePhoto,
+    clearPhotos,
+    acceptedCount,
+    excludedCount,
+    getApprovedMedia,
   }
 }

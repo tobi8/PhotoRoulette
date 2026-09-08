@@ -58,6 +58,36 @@ const DEFAULT_SETTINGS: GameSettings = {
   tvMode: false,
 }
 
+interface ActiveSession {
+  roomCode: string
+  isHost: boolean
+  player: Player
+  players?: Player[]
+  settings?: GameSettings
+  phase?: GamePhase
+  timestamp: number
+}
+
+const SESSION_STORAGE_KEY = 'pr_active_game_session'
+
+function saveGameSession(data: Partial<ActiveSession>) {
+  try {
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY)
+    const prev = raw ? JSON.parse(raw) : {}
+    const merged = { ...prev, ...data, timestamp: Date.now() }
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(merged))
+  } catch {}
+}
+
+function clearGameSession() {
+  try {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY)
+    if (window.location.hash) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  } catch {}
+}
+
 export default function App() {
   // Sound system
   const {
@@ -186,6 +216,7 @@ export default function App() {
               payload: { players: updated, settings: stateRef.current.settings },
             })
 
+            saveGameSession({ players: updated })
             return updated
           })
 
@@ -199,6 +230,14 @@ export default function App() {
           setSettings(payload.settings)
           setPlayers(payload.players)
           setPhase('LOBBY')
+          saveGameSession({
+            roomCode: peerConnection.roomCode,
+            isHost: false,
+            player: payload.player,
+            players: payload.players,
+            settings: payload.settings,
+            phase: 'LOBBY',
+          })
           playPop()
           break
         }
@@ -239,6 +278,7 @@ export default function App() {
               senderId: peerConnection.peerId,
               payload: { players: updated, settings: stateRef.current.settings },
             })
+            saveGameSession({ players: updated })
             return updated
           })
           break
@@ -255,6 +295,7 @@ export default function App() {
               senderId: peerConnection.peerId,
               payload: { players: updated, settings: stateRef.current.settings },
             })
+            saveGameSession({ players: updated })
             return updated
           })
           playPop()
@@ -263,8 +304,14 @@ export default function App() {
 
         // [CLIENT & HOST HANDLER] State synchronization
         case 'STATE_SYNC': {
-          if (payload.players) setPlayers(payload.players)
-          if (payload.settings) setSettings(payload.settings)
+          if (payload.players) {
+            setPlayers(payload.players)
+            saveGameSession({ players: payload.players })
+          }
+          if (payload.settings) {
+            setSettings(payload.settings)
+            saveGameSession({ settings: payload.settings })
+          }
           break
         }
 
@@ -399,15 +446,86 @@ export default function App() {
   const peerConnection = usePeerConnection(handlePeerMessage, handlePeerDisconnected)
 
   // --------------------------------------------------------------------------
-  // Auto-fill room code from URL hash (e.g. #ROOM12)
+  // Auto-fill room code from URL hash (e.g. #ROOM12) & auto-restore active session
   // --------------------------------------------------------------------------
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search)
     const queryRoom = searchParams.get('room')
     const hash = window.location.hash.replace('#', '').trim()
     const targetRoom = queryRoom || hash
+
     if (targetRoom && targetRoom.length >= 4) {
-      setInputRoomCode(formatRoomCode(targetRoom))
+      const formatted = formatRoomCode(targetRoom)
+
+      try {
+        const savedRaw = sessionStorage.getItem(SESSION_STORAGE_KEY)
+        if (savedRaw) {
+          const saved: ActiveSession = JSON.parse(savedRaw)
+          // Allow session recovery if room matches and session was within last 2 hours
+          if (
+            saved &&
+            saved.roomCode === formatted &&
+            Date.now() - (saved.timestamp || 0) < 7200000
+          ) {
+            console.log('Restoring active game session for room:', formatted, 'isHost:', saved.isHost)
+            if (saved.isHost) {
+              peerConnection
+                .createRoom(formatted)
+                .then(({ peerId }) => {
+                  const restoredHost: Player = {
+                    ...(saved.player || {}),
+                    id: peerId,
+                    isHost: true,
+                  }
+                  setCurrentPlayer(restoredHost)
+                  setPlayers(
+                    saved.players && saved.players.length > 0
+                      ? saved.players
+                      : [restoredHost]
+                  )
+                  if (saved.settings) setSettings(saved.settings)
+                  setPhase(
+                    saved.phase && saved.phase !== 'LANDING' ? saved.phase : 'LOBBY'
+                  )
+                })
+                .catch((err) => {
+                  console.warn('Failed to restore host room:', err)
+                  setInputRoomCode(formatted)
+                  setLandingMode('JOIN_SETUP')
+                })
+              return
+            } else {
+              peerConnection
+                .joinRoom(formatted)
+                .then(({ peerId }) => {
+                  const restoredClient: Player = {
+                    ...(saved.player || {}),
+                    id: peerId,
+                    isHost: false,
+                  }
+                  setCurrentPlayer(restoredClient)
+                  if (saved.settings) setSettings(saved.settings)
+                  setPhase('LOBBY')
+                  peerConnection.sendToHost({
+                    type: 'JOIN_REQUEST',
+                    senderId: peerId,
+                    payload: restoredClient,
+                  })
+                })
+                .catch((err) => {
+                  console.warn('Failed to re-join room:', err)
+                  setInputRoomCode(formatted)
+                  setLandingMode('JOIN_SETUP')
+                })
+              return
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Session restore error:', e)
+      }
+
+      setInputRoomCode(formatted)
       setLandingMode('JOIN_SETUP')
     }
   }, [])
@@ -436,6 +554,15 @@ export default function App() {
     setCurrentPlayer(hostPlayer)
     setPlayers([hostPlayer])
     setPhase('LOBBY')
+    window.location.hash = `#${code}`
+    saveGameSession({
+      roomCode: code,
+      isHost: true,
+      player: hostPlayer,
+      players: [hostPlayer],
+      settings,
+      phase: 'LOBBY',
+    })
     playPop()
   }
 
@@ -443,7 +570,8 @@ export default function App() {
   const joinExistingGame = async () => {
     if (!inputRoomCode.trim()) return
 
-    const { peerId: generatedPeerId } = await peerConnection.joinRoom(inputRoomCode)
+    const formattedCode = formatRoomCode(inputRoomCode)
+    const { peerId: generatedPeerId } = await peerConnection.joinRoom(formattedCode)
 
     const clientPlayer: Player = {
       id: generatedPeerId,
@@ -460,6 +588,15 @@ export default function App() {
     }
 
     setCurrentPlayer(clientPlayer)
+    window.location.hash = `#${formattedCode}`
+    saveGameSession({
+      roomCode: formattedCode,
+      isHost: false,
+      player: clientPlayer,
+      players: [clientPlayer],
+      settings,
+      phase: 'LOBBY',
+    })
 
     // Send Join Request to Host
     peerConnection.sendToHost({
@@ -917,6 +1054,7 @@ export default function App() {
   const handlePlayAgain = () => {
     clearAutoTimer()
     setPhase('LOBBY')
+    saveGameSession({ phase: 'LOBBY' })
     setIsReady(false)
     setActiveRound({
       roundNumber: 0,
@@ -933,6 +1071,17 @@ export default function App() {
       senderId: peerConnection.peerId,
       payload: {},
     })
+  }
+
+  // Gracefully leave game and clear persisted session
+  const handleLeaveGame = () => {
+    if (phase === 'ACTIVE_ROUND') return
+    clearGameSession()
+    peerConnection.disconnect()
+    setCurrentPlayer(null)
+    setPlayers([])
+    setPhase('LANDING')
+    setLandingMode('SELECT')
   }
 
   // --------------------------------------------------------------------------
@@ -990,7 +1139,7 @@ export default function App() {
       {/* Top Navigation Bar */}
       <header className="w-full max-w-4xl mx-auto px-4 py-3 flex items-center justify-between z-30">
         <div
-          onClick={() => phase !== 'ACTIVE_ROUND' && setPhase('LANDING')}
+          onClick={handleLeaveGame}
           className="flex items-center gap-2 cursor-pointer select-none"
         >
           <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center text-xl shadow-lg shadow-violet-900/40 border border-white/20">
@@ -1148,7 +1297,10 @@ export default function App() {
                     variant="secondary"
                     size="md"
                     className="flex-1"
-                    onClick={() => setLandingMode('SELECT')}
+                    onClick={() => {
+                      setLandingMode('SELECT')
+                      clearGameSession()
+                    }}
                   >
                     Back
                   </Button>

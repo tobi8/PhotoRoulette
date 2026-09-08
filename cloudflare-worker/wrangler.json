@@ -1,5 +1,11 @@
 {
   "name": "photoroulette-worker",
   "main": "src/index.ts",
-  "compatibility_date": "2025-02-24"
+  "compatibility_date": "2025-02-24",
+  "kv_namespaces": [
+    {
+      "binding": "MEDIA_KV",
+      "id": "66a72523b60c4f099860450ef08906f5"
+    }
+  ]
 }

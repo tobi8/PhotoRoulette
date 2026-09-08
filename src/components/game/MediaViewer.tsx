@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ShieldAlert, AlertTriangle, Film } from 'lucide-react'
+import { ShieldAlert, AlertTriangle, Film, ImageOff } from 'lucide-react'
 
 interface MediaViewerProps {
   media: {
@@ -25,7 +25,12 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
   isMuted = false,
 }) => {
   const [blurAmount, setBlurAmount] = useState(progressiveBlur ? 24 : 0)
+  const [hasError, setHasError] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    setHasError(false)
+  }, [media.id, media.dataUrl])
 
   // Manage video playback: automatically pauses when time expires, vetoed, or reaches 10s
   useEffect(() => {
@@ -92,7 +97,17 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
     >
       {/* Active Media */}
       {!isVetoed ? (
-        media.type === 'video' ? (
+        hasError ? (
+          <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center bg-gradient-to-br from-violet-950/80 via-purple-900/60 to-indigo-950/80 text-white">
+            <div className="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center mb-3 backdrop-blur-md border border-white/20 shadow-inner">
+              <ImageOff size={32} className="text-violet-300" />
+            </div>
+            <p className="font-bold text-base text-white">Party Media</p>
+            <p className="text-xs text-violet-300/80 mt-1 max-w-xs">
+              Who took this mysterious shot? Cast your guess!
+            </p>
+          </div>
+        ) : media.type === 'video' ? (
           <div className="relative w-full h-full flex items-center justify-center">
             <video
               ref={videoRef}
@@ -100,6 +115,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
               autoPlay
               playsInline
               muted={isMuted}
+              onError={() => setHasError(true)}
               onTimeUpdate={handleTimeUpdate}
               className="w-full h-full object-contain"
               style={{
@@ -118,6 +134,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
           <img
             src={media.dataUrl}
             alt="Roulette Photo"
+            onError={() => setHasError(true)}
             className="w-full h-full object-contain select-none pointer-events-none"
             style={{
               filter: `blur(${blurAmount}px)`,
