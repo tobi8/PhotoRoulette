@@ -60,9 +60,12 @@ jobs:
 
       - name: Copy APK to Web Distribution
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/PhotoRoulette.apk
+          APK_FILE=$(find android -type f -name "*.apk" | head -n 1)
+          echo "Found APK at: $APK_FILE"
+          cp "$APK_FILE" dist/PhotoRoulette.apk
           mkdir -p public
-          cp android/app/build/outputs/apk/debug/app-debug.apk public/PhotoRoulette.apk
+          cp "$APK_FILE" public/PhotoRoulette.apk
+          ls -la dist/PhotoRoulette.apk
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
