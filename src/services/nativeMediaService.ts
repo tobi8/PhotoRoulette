@@ -36,17 +36,32 @@ export function isNativeApp(): boolean {
   return Capacitor.isNativePlatform()
 }
 
+export function isAndroid(): boolean {
+  return (
+    Capacitor.getPlatform() === 'android' ||
+    typeof (window as any).AndroidBridge !== 'undefined' ||
+    (typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent))
+  )
+}
+
 export function isAndroidApp(): boolean {
-  return Capacitor.getPlatform() === 'android'
+  return (
+    Capacitor.getPlatform() === 'android' ||
+    typeof (window as any).AndroidBridge !== 'undefined'
+  )
 }
 
 export function hasAndroidBridge(): boolean {
-  return Capacitor.isPluginAvailable('NativeGallery')
+  return (
+    Capacitor.getPlatform() === 'android' ||
+    typeof (window as any).AndroidBridge !== 'undefined' ||
+    Capacitor.isPluginAvailable('NativeGallery')
+  )
 }
 
 export async function checkAndroidGalleryPermission(): Promise<boolean> {
   try {
-    if (Capacitor.isPluginAvailable('NativeGallery')) {
+    if (hasAndroidBridge()) {
       const res = await AndroidGallery.checkGalleryPermission()
       return !!res.granted
     }
@@ -56,7 +71,7 @@ export async function checkAndroidGalleryPermission(): Promise<boolean> {
 
 export async function requestAndroidGalleryPermission(): Promise<boolean> {
   try {
-    if (Capacitor.isPluginAvailable('NativeGallery')) {
+    if (hasAndroidBridge()) {
       const res = await AndroidGallery.requestGalleryPermission()
       return !!res.granted
     }
@@ -66,7 +81,7 @@ export async function requestAndroidGalleryPermission(): Promise<boolean> {
 
 export async function openAndroidAppSettings(): Promise<void> {
   try {
-    if (Capacitor.isPluginAvailable('NativeGallery')) {
+    if (hasAndroidBridge()) {
       await AndroidGallery.openSettings()
     }
   } catch {}

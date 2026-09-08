@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react"
+import React, { useState, useMemo, useRef } from "react"
 import {
   Smartphone,
   Clipboard,
@@ -17,13 +17,14 @@ import { Badge } from "../ui/Badge"
 import { ImagePreviewModal } from "../ml/ImagePreviewModal"
 import { useDocumentFilter } from "../../hooks/useDocumentFilter"
 import {
+  isAndroid,
   hasAndroidBridge,
   pickRandom20Android,
   rerollAndroid,
   requestAndroidGalleryPermission,
   openAndroidAppSettings,
 } from "../../services/nativeMediaService"
-import { compressImage } from "../../utils/imageCompression"
+import { compressImage, processVideo } from "../../utils/imageCompression"
 
 interface MediaUploaderProps {
   onMediaReady: (mediaItems: Array<{ id: string; type: "image" | "video"; dataUrl: string }>) => void
@@ -42,12 +43,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   onToggleReady,
   mediaType = "mixed",
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [isPreparing, setIsPreparing] = useState(false)
   const [permissionDenied, setPermissionDenied] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
-  const isNativeAndroid = useMemo(() => hasAndroidBridge(), [])
+  const isAndroidDevice = useMemo(() => isAndroid(), [])
 
   const {
     items,
@@ -56,6 +58,57 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     removePhoto,
     getApprovedMedia,
   } = useDocumentFilter()
+
+  const processAndLoadFiles = async (fileList: File[]) => {
+    if (fileList.length === 0) return
+    setIsPreparing(true)
+    setStatusMessage("Processing media...")
+
+    try {
+      const shuffled = fileList.sort(() => Math.random() - 0.5).slice(0, 20)
+      const processed = await Promise.all(
+        shuffled.map(async (file, idx) => {
+          const isVideo = file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
+          if (isVideo) {
+            const res = await processVideo(file)
+            return {
+              id: `local_${Date.now()}_${idx}`,
+              type: "video" as const,
+              dataUrl: res.dataUrl,
+            }
+          } else {
+            const res = await compressImage(file, 800, 0.65)
+            return {
+              id: `local_${Date.now()}_${idx}`,
+              type: "image" as const,
+              dataUrl: res.dataUrl,
+            }
+          }
+        })
+      )
+
+      loadExistingMedia(processed)
+      onMediaReady(processed)
+      if (!isReady) {
+        onToggleReady()
+      }
+      setStatusMessage(`${processed.length} items loaded!`)
+    } catch (err) {
+      console.error(err)
+      setStatusMessage("Failed to process media.")
+    } finally {
+      setIsPreparing(false)
+      setTimeout(() => setStatusMessage(null), 4000)
+    }
+  }
+
+  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    const fileArray = Array.from(files)
+    e.target.value = ""
+    await processAndLoadFiles(fileArray)
+  }
 
   const handlePasteFromClipboard = async () => {
     setIsPreparing(true)
@@ -163,34 +216,36 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     setPermissionDenied(false)
     setStatusMessage("Picking 20 random media...")
     try {
-      const granted = await requestAndroidGalleryPermission()
-      if (!granted) {
-        setPermissionDenied(true)
-        setStatusMessage("Gallery permission required.")
-        setIsPreparing(false)
-        return
-      }
-
-      const assets = await pickRandom20Android(mediaType)
-      if (assets && assets.length > 0) {
-        const mapped = assets.map((a, idx) => ({
-          id: a.id || String(idx),
-          type: a.type,
-          dataUrl: a.dataUrl,
-        }))
-        loadExistingMedia(mapped)
-        onMediaReady(mapped)
-        if (!isReady) {
-          onToggleReady()
+      if (hasAndroidBridge()) {
+        const granted = await requestAndroidGalleryPermission()
+        if (!granted) {
+          setPermissionDenied(true)
+          setStatusMessage("Gallery permission required.")
+          setIsPreparing(false)
+          return
         }
-        setStatusMessage("20 items picked!")
-      } else {
-        setStatusMessage("No media returned from device.")
+
+        const assets = await pickRandom20Android(mediaType)
+        if (assets && assets.length > 0) {
+          const mapped = assets.map((a, idx) => ({
+            id: a.id || String(idx),
+            type: a.type,
+            dataUrl: a.dataUrl,
+          }))
+          loadExistingMedia(mapped)
+          onMediaReady(mapped)
+          if (!isReady) {
+            onToggleReady()
+          }
+          setStatusMessage("20 items picked!")
+          setIsPreparing(false)
+          return
+        }
       }
+      fileInputRef.current?.click()
     } catch (e: any) {
       console.error(e)
-      setPermissionDenied(true)
-      setStatusMessage("Failed to access gallery.")
+      fileInputRef.current?.click()
     } finally {
       setIsPreparing(false)
       setTimeout(() => setStatusMessage(null), 4000)
@@ -201,19 +256,25 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     setIsPreparing(true)
     setStatusMessage("Rerolling 20 items...")
     try {
-      const assets = await rerollAndroid(mediaType)
-      if (assets && assets.length > 0) {
-        const mapped = assets.map((a, idx) => ({
-          id: a.id || String(idx),
-          type: a.type,
-          dataUrl: a.dataUrl,
-        }))
-        loadExistingMedia(mapped)
-        onMediaReady(mapped)
-        setStatusMessage("Rerolled 20 items!")
+      if (hasAndroidBridge()) {
+        const assets = await rerollAndroid(mediaType)
+        if (assets && assets.length > 0) {
+          const mapped = assets.map((a, idx) => ({
+            id: a.id || String(idx),
+            type: a.type,
+            dataUrl: a.dataUrl,
+          }))
+          loadExistingMedia(mapped)
+          onMediaReady(mapped)
+          setStatusMessage("Rerolled 20 items!")
+          setIsPreparing(false)
+          return
+        }
       }
+      fileInputRef.current?.click()
     } catch (e: any) {
       console.error(e)
+      fileInputRef.current?.click()
     } finally {
       setIsPreparing(false)
       setTimeout(() => setStatusMessage(null), 4000)
@@ -246,6 +307,21 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   return (
     <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl space-y-4">
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={
+          mediaType === "videos_only"
+            ? "video/*,.mp4,.mov,.m4v,.webm"
+            : mediaType === "photos_only"
+            ? "image/*,.heic,.heif"
+            : "image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm"
+        }
+        className="hidden"
+        onChange={handleFileInputChange}
+      />
+
       <div className="flex items-center justify-between pb-2 border-b border-white/10">
         <h3 className="font-bold text-white text-base">Media Selection</h3>
         {items.length > 0 && (
@@ -271,7 +347,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
       {items.length === 0 ? (
         <div className="space-y-3">
-          {isNativeAndroid ? (
+          {isAndroidDevice ? (
             <>
               {permissionDenied && (
                 <div className="p-3.5 rounded-2xl bg-amber-950/60 border border-amber-500/40 text-xs text-amber-200 flex items-center justify-between gap-3">
@@ -407,7 +483,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               <span>{isReady ? "Ready in Lobby (Tap to Cancel)" : "I'm Ready!"}</span>
             </Button>
 
-            {isNativeAndroid ? (
+            {isAndroidDevice ? (
               <Button
                 variant="outline"
                 size="sm"
