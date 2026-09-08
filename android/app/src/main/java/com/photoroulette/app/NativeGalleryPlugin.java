@@ -65,7 +65,11 @@ public class NativeGalleryPlugin extends Plugin {
     @PluginMethod
     public void pickRandom20(PluginCall call) {
         if (!hasRequiredPermissions()) {
-            requestAllPermissions(call, "permissionCallbackPickRandom20");
+            if (Build.VERSION.SDK_INT >= 33) {
+                requestPermissionForAlias("media", call, "permissionCallbackPickRandom20");
+            } else {
+                requestPermissionForAlias("storage", call, "permissionCallbackPickRandom20");
+            }
             return;
         }
         processRandom20(call);
@@ -74,7 +78,11 @@ public class NativeGalleryPlugin extends Plugin {
     @PluginMethod
     public void reroll(PluginCall call) {
         if (!hasRequiredPermissions()) {
-            requestAllPermissions(call, "permissionCallbackPickRandom20");
+            if (Build.VERSION.SDK_INT >= 33) {
+                requestPermissionForAlias("media", call, "permissionCallbackPickRandom20");
+            } else {
+                requestPermissionForAlias("storage", call, "permissionCallbackPickRandom20");
+            }
             return;
         }
         processRandom20(call);
@@ -95,7 +103,11 @@ public class NativeGalleryPlugin extends Plugin {
             call.resolve(res);
             return;
         }
-        requestAllPermissions(call, "permissionCallbackDirectRequest");
+        if (Build.VERSION.SDK_INT >= 33) {
+            requestPermissionForAlias("media", call, "permissionCallbackDirectRequest");
+        } else {
+            requestPermissionForAlias("storage", call, "permissionCallbackDirectRequest");
+        }
     }
 
     @PluginMethod

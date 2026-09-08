@@ -264,11 +264,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           setIsPreparing(false)
           return
         }
+        setStatusMessage("No media found on device.")
+      } else {
+        setStatusMessage("Android native gallery bridge not available.")
       }
-      fileInputRef.current?.click()
     } catch (e: any) {
       console.error(e)
-      fileInputRef.current?.click()
+      setStatusMessage("Failed to pick media automatically.")
     } finally {
       setIsPreparing(false)
       setTimeout(() => setStatusMessage(null), 4000)
@@ -293,11 +295,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           setIsPreparing(false)
           return
         }
+        setStatusMessage("No media found on device.")
+      } else {
+        setStatusMessage("Android native gallery bridge not available.")
       }
-      fileInputRef.current?.click()
     } catch (e: any) {
       console.error(e)
-      fileInputRef.current?.click()
+      setStatusMessage("Failed to reroll media.")
     } finally {
       setIsPreparing(false)
       setTimeout(() => setStatusMessage(null), 4000)
