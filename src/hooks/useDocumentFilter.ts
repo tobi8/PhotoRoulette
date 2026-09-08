@@ -40,31 +40,41 @@ export function useDocumentFilter() {
   /**
    * Process uploaded files with automatic AI document analysis
    */
-  const processFiles = useCallback(async (files: File[]): Promise<{
+  const processFiles = useCallback(async (
+    files: File[],
+    options?: { turbo?: boolean }
+  ): Promise<{
     accepted: MediaItem[]
     excluded: ExcludedMediaItem[]
   }> => {
+    const isTurbo = options?.turbo ?? true
     setIsScanning(true)
-    setProgress({ current: 0, total: files.length, status: 'Preparing scanner...' })
+    setProgress({ current: 0, total: files.length, status: isTurbo ? '⚡ Initializing Turbo fast scan...' : 'Preparing scanner...' })
 
     const results: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
 
-    // Process 2 files at a time to prevent mobile browser memory exhaustion
-    const BATCH_SIZE = 2
+    // In turbo mode, process 4 files concurrently with ultra-light compression
+    const BATCH_SIZE = isTurbo ? 4 : 2
+    const compressionOpts = isTurbo
+      ? { maxDim: 480, quality: 0.45 }
+      : { maxDim: 800, quality: 0.65 }
+
     for (let i = 0; i < files.length; i += BATCH_SIZE) {
       const batch = files.slice(i, i + BATCH_SIZE)
       setProgress({
         current: Math.min(i + batch.length, files.length),
         total: files.length,
-        status: `Analyzing photos (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
+        status: isTurbo
+          ? `⚡ Turbo processing (${Math.min(i + batch.length, files.length)} of ${files.length})...`
+          : `Analyzing photos (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
       })
 
       const batchResults = await Promise.all(
         batch.map(async (file, batchIdx) => {
           const fileIndex = i + batchIdx
           try {
-            // 1. Compress media to JPEG
-            const compressed = await processMediaFile(file)
+            // 1. Compress media to lightweight JPEG
+            const compressed = await processMediaFile(file, compressionOpts)
 
             // 2. Run instant Canvas Heuristic AI analysis
             const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl, file.name)

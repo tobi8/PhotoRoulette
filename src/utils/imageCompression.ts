@@ -135,11 +135,70 @@ async function decodeHeicFile(file: File, maxDim = 960, quality = 0.70): Promise
 }
 
 /**
- * Tries hardware-accelerated native browser image decoding via URL.createObjectURL(file) + new Image().
- * On iOS/macOS Safari and WebKit, iPhone HEIC/HEIF photos are decoded natively in GPU hardware in ~15ms,
- * preventing CPU lockups and tab memory freezes.
+ * Tries hardware-accelerated native browser image decoding via createImageBitmap
+ * or URL.createObjectURL(file) + new Image().
+ * On iOS/macOS Safari and WebKit, iPhone photos are decoded in GPU hardware in ~5ms.
  */
-function tryNativeDecode(file: File, maxDim = 960, quality = 0.70, timeoutMs = 2500): Promise<CompressionResult | null> {
+async function tryNativeDecode(
+  file: File,
+  maxDim = 540,
+  quality = 0.48,
+  timeoutMs = 1500
+): Promise<CompressionResult | null> {
+  // Method 1: Offscreen hardware decode via createImageBitmap (fastest on modern Safari & Chromium)
+  if (typeof createImageBitmap !== 'undefined') {
+    try {
+      const bitmap = await createImageBitmap(file)
+      let { width, height } = bitmap
+      if (width > 0 && height > 0) {
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width)
+            width = maxDim
+          } else {
+            width = Math.round((width * maxDim) / height)
+            height = maxDim
+          }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.drawImage(bitmap, 0, 0, width, height)
+          bitmap.close()
+          const dataUrl = canvas.toDataURL('image/jpeg', quality)
+
+          // Small thumbnail for preview modal
+          const thumbScale = Math.min(180 / width, 180 / height)
+          const thumbW = Math.max(1, Math.round(width * thumbScale))
+          const thumbH = Math.max(1, Math.round(height * thumbScale))
+          const thumbCanvas = document.createElement('canvas')
+          thumbCanvas.width = thumbW
+          thumbCanvas.height = thumbH
+          const thumbCtx = thumbCanvas.getContext('2d')
+          let thumbUrl = dataUrl
+          if (thumbCtx) {
+            thumbCtx.drawImage(canvas, 0, 0, thumbW, thumbH)
+            thumbUrl = thumbCanvas.toDataURL('image/jpeg', 0.45)
+          }
+
+          return {
+            dataUrl,
+            thumbnailUrl: thumbUrl,
+            width,
+            height,
+            sizeBytes: Math.round((dataUrl.length * 3) / 4),
+            type: 'image',
+          }
+        }
+      }
+    } catch {
+      // Fall through to Image element fallback
+    }
+  }
+
+  // Method 2: new Image() with object URL
   return new Promise((resolve) => {
     let settled = false
     const objectUrl = URL.createObjectURL(file)
@@ -194,14 +253,14 @@ function tryNativeDecode(file: File, maxDim = 960, quality = 0.70, timeoutMs = 2
 
         // Generate small thumbnail for review modal
         const thumbCanvas = document.createElement('canvas')
-        const thumbScale = Math.min(240 / width, 240 / height)
+        const thumbScale = Math.min(180 / width, 180 / height)
         thumbCanvas.width = Math.max(1, Math.round(width * thumbScale))
         thumbCanvas.height = Math.max(1, Math.round(height * thumbScale))
         const thumbCtx = thumbCanvas.getContext('2d')
         let thumbUrl = dataUrl
         if (thumbCtx) {
           thumbCtx.drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height)
-          thumbUrl = thumbCanvas.toDataURL('image/jpeg', 0.6)
+          thumbUrl = thumbCanvas.toDataURL('image/jpeg', 0.45)
         }
 
         const sizeBytes = Math.round((dataUrl.length * 3) / 4)
@@ -224,14 +283,21 @@ function tryNativeDecode(file: File, maxDim = 960, quality = 0.70, timeoutMs = 2
 }
 
 /**
- * Resizes and compresses an image file to max 960x960, JPEG ~70%, kept small for P2P WebRTC transfer and IndexedDB storage.
- * Seamlessly handles iPhone HEIC/HEIF files with instant native hardware decoding on iOS and WASM fallback.
+ * Resizes and compresses an image file to max 540x540, JPEG ~48%, kept compact (~20KB)
+ * for ultra-fast P2P WebRTC transfer and instantaneous loading on mobile devices.
  */
-export async function compressImage(file: File, maxDim = 960, quality = 0.70): Promise<CompressionResult> {
-  const isHeic = /\.(heic|heif)$/i.test(file.name) || file.type === 'image/heic' || file.type === 'image/heif'
+export async function compressImage(
+  file: File,
+  maxDim = 540,
+  quality = 0.48
+): Promise<CompressionResult> {
+  const isHeic =
+    /\.(heic|heif)$/i.test(file.name) ||
+    file.type === 'image/heic' ||
+    file.type === 'image/heif'
 
-  // 1. Try instant hardware-accelerated native decode (works in ~15ms on iOS Safari/WebKit and native apps)
-  const nativeResult = await tryNativeDecode(file, maxDim, quality, isHeic ? 1800 : 3000)
+  // 1. Try instant hardware-accelerated native decode (GPU-accelerated, ~5ms)
+  const nativeResult = await tryNativeDecode(file, maxDim, quality, isHeic ? 800 : 1500)
   if (nativeResult) {
     return nativeResult
   }
@@ -247,8 +313,8 @@ export async function compressImage(file: File, maxDim = 960, quality = 0.70): P
   return {
     dataUrl: fallbackUrl,
     thumbnailUrl: fallbackUrl,
-    width: 800,
-    height: 600,
+    width: 600,
+    height: 450,
     sizeBytes: fallbackUrl.length,
     type: 'image',
   }
@@ -429,7 +495,10 @@ export async function processVideo(file: File): Promise<CompressionResult> {
 /**
  * Universal media processor: handles both images and videos safely on all devices
  */
-export async function processMediaFile(file: File): Promise<CompressionResult> {
+export async function processMediaFile(
+  file: File,
+  options?: { maxDim?: number; quality?: number }
+): Promise<CompressionResult> {
   // Skip hidden system files (.DS_Store, AppleDouble metadata ._foo.jpg, empty files)
   if (file.name.startsWith('.') || file.size === 0) {
     throw new Error('Ignored hidden or empty system file')
@@ -442,7 +511,7 @@ export async function processMediaFile(file: File): Promise<CompressionResult> {
   if (isVideo) {
     return processVideo(file)
   }
-  return compressImage(file)
+  return compressImage(file, options?.maxDim ?? 540, options?.quality ?? 0.48)
 }
 
 

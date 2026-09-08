@@ -25,6 +25,7 @@ import {
   getMockPartyDeck,
   MOCK_BOT_PLAYERS,
 } from './utils/mockData'
+import { buildBalancedRouletteDeck } from './utils/deckBuilder'
 
 // UI Components
 import { Button } from './components/ui/Button'
@@ -207,6 +208,7 @@ export default function App() {
           if (!stateRef.current.currentPlayer?.isHost) return
           const items: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }> = payload.items || []
           const contributorId = payload.playerId || fromPeerId
+          const isInitial = payload.isInitialBatch ?? true
 
           const mapped: MediaItem[] = items.map((item) => ({
             ...item,
@@ -214,12 +216,24 @@ export default function App() {
             ownerName: stateRef.current.players.find((p) => p.id === contributorId)?.name || 'Player',
           }))
 
-          // Merge into host master media deck
-          mediaDeckRef.current = [...mediaDeckRef.current.filter((m) => m.ownerId !== contributorId), ...mapped]
+          if (isInitial) {
+            // Replace previous contributions for this player with initial batch
+            mediaDeckRef.current = [
+              ...mediaDeckRef.current.filter((m) => m.ownerId !== contributorId),
+              ...mapped,
+            ]
+          } else {
+            // Append subsequent batch and deduplicate by id
+            const existingIds = new Set(mediaDeckRef.current.map((m) => m.id))
+            const newItems = mapped.filter((m) => !existingIds.has(m.id))
+            mediaDeckRef.current = [...mediaDeckRef.current, ...newItems]
+          }
+
+          const currentCount = mediaDeckRef.current.filter((m) => m.ownerId === contributorId).length
 
           // Update player's mediaCount
           setPlayers((prev) => {
-            const updated = prev.map((p) => (p.id === contributorId ? { ...p, mediaCount: items.length } : p))
+            const updated = prev.map((p) => (p.id === contributorId ? { ...p, mediaCount: currentCount } : p))
             peerConnection.broadcast({
               type: 'STATE_SYNC',
               senderId: peerConnection.peerId,
@@ -524,12 +538,26 @@ export default function App() {
         prev.map((p) => (p.id === myId ? { ...p, mediaCount: items.length } : p))
       )
     } else {
-      // Client sends to host
-      peerConnection.sendToHost({
-        type: 'MEDIA_CONTRIBUTION',
-        senderId: myId,
-        payload: { playerId: myId, items },
-      })
+      // Client sends to host in small batches to prevent WebRTC DataChannel buffer overflow
+      const BATCH_SIZE = 2
+      const sendBatches = async () => {
+        for (let i = 0; i < items.length; i += BATCH_SIZE) {
+          const batch = items.slice(i, i + BATCH_SIZE)
+          peerConnection.sendToHost({
+            type: 'MEDIA_CONTRIBUTION',
+            senderId: myId,
+            payload: {
+              playerId: myId,
+              items: batch,
+              isInitialBatch: i === 0,
+            },
+          })
+          if (i + BATCH_SIZE < items.length) {
+            await new Promise((resolve) => setTimeout(resolve, 35))
+          }
+        }
+      }
+      sendBatches()
     }
   }
 
@@ -558,60 +586,13 @@ export default function App() {
   const startFullGame = () => {
     clearAutoTimer()
 
-    let currentDeck = [...mediaDeckRef.current]
-
-    if (settings.mediaType === 'photos_only') {
-      currentDeck = currentDeck.filter((m) => m.type === 'image')
-      if (currentDeck.length === 0) {
-        currentDeck = getMockPartyPhotos().map((p, idx) => ({
-          ...p,
-          ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
-          ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
-        }))
-      }
-    } else if (settings.mediaType === 'videos_only') {
-      currentDeck = currentDeck.filter((m) => m.type === 'video')
-      // If no videos uploaded by players, automatically populate with mock party videos!
-      if (currentDeck.length === 0) {
-        currentDeck = getMockPartyVideos().map((v, idx) => ({
-          ...v,
-          ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
-          ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
-        }))
-      }
-    } else {
-      // 'mixed' mode: Ensure BOTH photos and videos are present and interleaved!
-      let photos = currentDeck.filter((m) => m.type === 'image')
-      let videos = currentDeck.filter((m) => m.type === 'video')
-
-      // If no videos uploaded, mix in mock party videos!
-      if (videos.length === 0) {
-        videos = getMockPartyVideos().map((v, idx) => ({
-          ...v,
-          ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
-          ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
-        }))
-      }
-      // If no photos uploaded, mix in mock photos!
-      if (photos.length === 0) {
-        photos = getMockPartyPhotos().map((p, idx) => ({
-          ...p,
-          ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
-          ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
-        }))
-      }
-
-      // Interleave videos and photos so players experience both in mixed mode
-      const shuffledP = [...photos].sort(() => Math.random() - 0.5)
-      const shuffledV = [...videos].sort(() => Math.random() - 0.5)
-      const mixedInterleaved: MediaItem[] = []
-      let pIdx = 0, vIdx = 0
-      while (pIdx < shuffledP.length || vIdx < shuffledV.length) {
-        if (pIdx < shuffledP.length) mixedInterleaved.push(shuffledP[pIdx++])
-        if (vIdx < shuffledV.length) mixedInterleaved.push(shuffledV[vIdx++])
-      }
-      currentDeck = mixedInterleaved
-    }
+    // Build fair, balanced deck distributed evenly across all contributing players
+    const currentDeck = buildBalancedRouletteDeck(
+      mediaDeckRef.current,
+      players,
+      settings.mediaType,
+      settings.totalRounds || 10
+    )
 
     // Set media deck
     mediaDeckRef.current = currentDeck

@@ -52,6 +52,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const [vaultCount, setVaultCount] = useState<number>(0)
   const [isSecretMode, setIsSecretMode] = useState<boolean>(false)
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
+  const [isTurboMode, setIsTurboMode] = useState<boolean>(true)
 
   const {
     isScanning,
@@ -148,7 +149,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       filesArray = fisherYatesShuffle(filesArray)
 
       // Process and filter files (downscaling + document heuristics + safety filter)
-      const { accepted } = await processFiles(filesArray)
+      const { accepted } = await processFiles(filesArray, { turbo: isTurboMode })
 
       if (accepted.length > 0) {
         // Automatically save all clean accepted media into device's persistent IndexedDB vault
@@ -337,29 +338,44 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           </p>
         </div>
 
-        {vaultCount > 0 && (
-          <Badge variant="success" size="md">
-            {mediaType === 'videos_only'
-              ? `🎥 ${vaultCount} Videos`
-              : mediaType === 'photos_only'
-              ? `💾 ${vaultCount} Photos`
-              : `✨ ${vaultCount} Items`}{' '}
-            in Vault
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsTurboMode(!isTurboMode)}
+            className={`px-2.5 py-1 rounded-full text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+              isTurboMode
+                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
+                : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+            }`}
+            title={isTurboMode ? 'Turbo Fast mode active: Lower quality for ultra-fast loading' : 'Standard quality active'}
+          >
+            <span>{isTurboMode ? '⚡ Turbo Fast (Low Res)' : '🖼️ Standard Res'}</span>
+          </button>
+
+          {vaultCount > 0 && (
+            <Badge variant="success" size="md">
+              {mediaType === 'videos_only'
+                ? `🎥 ${vaultCount} Videos`
+                : mediaType === 'photos_only'
+                ? `💾 ${vaultCount} Photos`
+                : `✨ ${vaultCount} Items`}{' '}
+              in Vault
+            </Badge>
+          )}
+        </div>
       </div>
 
-      {/* Hidden native input */}
+      {/* Hidden native input with iOS native hardware conversion support */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
         accept={
           mediaType === 'videos_only'
-            ? 'video/*,.mp4,.mov,.m4v,.webm,.avi,.mkv'
+            ? 'video/mp4,video/quicktime,video/webm,video/*'
             : mediaType === 'photos_only'
-            ? 'image/*,.heic,.heif'
-            : 'image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm'
+            ? 'image/jpeg,image/png,image/webp,image/*'
+            : 'image/jpeg,image/png,image/webp,image/*,video/mp4,video/quicktime,video/*'
         }
         className="hidden"
         onChange={handleFileChange}

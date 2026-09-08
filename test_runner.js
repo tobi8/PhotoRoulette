@@ -106,4 +106,33 @@ assert.strictEqual(isMediaFile('photo.heic'), true, 'Should accept .heic')
 assert.strictEqual(isMediaFile('notes.pdf'), false, 'Should reject .pdf')
 console.log('✅ File extension & hidden file filtering passed')
 
+// 6. Test Balanced Multi-Player Roulette Deck Generation (No Host Dominance)
+import { buildBalancedRouletteDeck, fisherYatesShuffle } from './src/utils/deckBuilder.ts'
+
+const testPlayersList = [
+  { id: 'host', name: 'Host', avatar: '👑', color: '#ff0055', isHost: true, isReady: true, score: 0, streak: 0, lastRoundPoints: 0, fastestAnswersCount: 0, mediaCount: 30 },
+  { id: 'player_b', name: 'Player B', avatar: '🦊', color: '#00ccff', isHost: false, isReady: true, score: 0, streak: 0, lastRoundPoints: 0, fastestAnswersCount: 0, mediaCount: 5 },
+  { id: 'player_c', name: 'Player C', avatar: '🐼', color: '#00ff88', isHost: false, isReady: true, score: 0, streak: 0, lastRoundPoints: 0, fastestAnswersCount: 0, mediaCount: 5 },
+]
+
+// Host has 30 photos, while B and C have 5 photos each
+const rawPhotosDeck = [
+  ...Array.from({ length: 30 }, (_, i) => ({ id: `host_${i}`, type: 'image', dataUrl: 'data:image/jpeg;base64,123', ownerId: 'host', ownerName: 'Host' })),
+  ...Array.from({ length: 5 }, (_, i) => ({ id: `b_${i}`, type: 'image', dataUrl: 'data:image/jpeg;base64,456', ownerId: 'player_b', ownerName: 'Player B' })),
+  ...Array.from({ length: 5 }, (_, i) => ({ id: `c_${i}`, type: 'image', dataUrl: 'data:image/jpeg;base64,789', ownerId: 'player_c', ownerName: 'Player C' })),
+]
+
+const balancedDeck = buildBalancedRouletteDeck(rawPhotosDeck, testPlayersList, 'photos_only', 10)
+assert.strictEqual(balancedDeck.length, 10, 'Deck should contain exactly 10 rounds')
+
+const countsByOwner = {}
+for (const item of balancedDeck) {
+  countsByOwner[item.ownerId] = (countsByOwner[item.ownerId] || 0) + 1
+}
+
+assert.ok(countsByOwner['host'] <= 4, `Host should not dominate deck (got ${countsByOwner['host']})`)
+assert.ok(countsByOwner['player_b'] >= 3, `Player B should have fair share (got ${countsByOwner['player_b']})`)
+assert.ok(countsByOwner['player_c'] >= 3, `Player C should have fair share (got ${countsByOwner['player_c']})`)
+console.log('✅ Balanced deck distribution passed (Host: %d, Player B: %d, Player C: %d)', countsByOwner['host'], countsByOwner['player_b'], countsByOwner['player_c'])
+
 console.log('🎉 All automated tests passed successfully!')
