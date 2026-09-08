@@ -75,7 +75,12 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     try {
       sessionStorage.setItem("pending_paste", "true")
       setIsPendingPaste(true)
-      const shortcutUrl = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}`
+      const currentOrigin = window.location.origin
+      const currentPath = window.location.pathname
+      const effectiveRoom = roomId || "ROOM"
+      const effectiveUser = userId || "USER"
+      const returnUrl = `${currentOrigin}${currentPath}?room=${encodeURIComponent(effectiveRoom)}&user=${encodeURIComponent(effectiveUser)}&source=shortcut#${encodeURIComponent(effectiveRoom)}`
+      const shortcutUrl = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&input=text&text=${encodeURIComponent(returnUrl)}`
       window.location.href = shortcutUrl
     } catch (err) {
       console.error(err)
