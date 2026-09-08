@@ -739,7 +739,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-5 gap-1.5 sm:gap-2 max-h-36 sm:max-h-48 overflow-y-auto p-1.5 bg-black/30 rounded-2xl border border-white/5">
+          <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 sm:gap-2.5 p-2 bg-black/30 rounded-2xl border border-white/5">
             {items.map((item) => (
               <div
                 key={item.id}
