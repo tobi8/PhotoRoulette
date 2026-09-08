@@ -580,34 +580,41 @@ export default function App() {
         }))
       }
     } else {
-      // 'mixed' mode: Ensure BOTH photos and videos are present!
-      const photos = currentDeck.filter((m) => m.type === 'image')
-      const videos = currentDeck.filter((m) => m.type === 'video')
+      // 'mixed' mode: Ensure BOTH photos and videos are present and interleaved!
+      let photos = currentDeck.filter((m) => m.type === 'image')
+      let videos = currentDeck.filter((m) => m.type === 'video')
 
-      const combined = [...currentDeck]
       // If no videos uploaded, mix in mock party videos!
       if (videos.length === 0) {
-        const mockVideos = getMockPartyVideos().map((v, idx) => ({
+        videos = getMockPartyVideos().map((v, idx) => ({
           ...v,
           ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
           ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
         }))
-        combined.push(...mockVideos)
       }
       // If no photos uploaded, mix in mock photos!
       if (photos.length === 0) {
-        const mockPhotos = getMockPartyPhotos().map((p, idx) => ({
+        photos = getMockPartyPhotos().map((p, idx) => ({
           ...p,
           ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
           ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
         }))
-        combined.push(...mockPhotos)
       }
-      currentDeck = combined
+
+      // Interleave videos and photos so players experience both in mixed mode
+      const shuffledP = [...photos].sort(() => Math.random() - 0.5)
+      const shuffledV = [...videos].sort(() => Math.random() - 0.5)
+      const mixedInterleaved: MediaItem[] = []
+      let pIdx = 0, vIdx = 0
+      while (pIdx < shuffledP.length || vIdx < shuffledV.length) {
+        if (pIdx < shuffledP.length) mixedInterleaved.push(shuffledP[pIdx++])
+        if (vIdx < shuffledV.length) mixedInterleaved.push(shuffledV[vIdx++])
+      }
+      currentDeck = mixedInterleaved
     }
 
-    // Shuffle media deck
-    mediaDeckRef.current = currentDeck.sort(() => Math.random() - 0.5)
+    // Set media deck
+    mediaDeckRef.current = currentDeck
 
     // Reset scores & streaks
     const resetPlayers = players.map((p) => ({
@@ -1218,6 +1225,7 @@ export default function App() {
                   onMediaReady={handleMediaContribute}
                   isReady={isReady}
                   onToggleReady={handleToggleReady}
+                  mediaType={settings.mediaType}
                 />
 
                 {/* Player List */}

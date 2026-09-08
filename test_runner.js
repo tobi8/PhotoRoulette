@@ -92,6 +92,18 @@ assert.ok(photosOnlyDeck.every((m) => m.type === 'image'), 'All items in photos-
 const mixedDeck = getMockPartyDeck('mixed')
 assert.ok(mixedDeck.some((m) => m.type === 'video'), 'Mixed deck must contain videos')
 assert.ok(mixedDeck.some((m) => m.type === 'image'), 'Mixed deck must contain photos')
-console.log('✅ Video and mixed media deck modes passed')
+// 5. Test Media Extension Filtering & Hidden Files
+const isMediaFile = (fileName) => {
+  if (fileName.startsWith('.') || fileName.length === 0) return false
+  return /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif|avif|mp4|mov|m4v|webm|avi|mkv|3gp|ogv)$/i.test(fileName)
+}
+assert.strictEqual(isMediaFile('.DS_Store'), false, 'Should reject .DS_Store')
+assert.strictEqual(isMediaFile('._IMG_1234.JPG'), false, 'Should reject AppleDouble metadata file')
+assert.strictEqual(isMediaFile('vacation.mp4'), true, 'Should accept .mp4')
+assert.strictEqual(isMediaFile('party.MOV'), true, 'Should accept .MOV')
+assert.strictEqual(isMediaFile('fun.webm'), true, 'Should accept .webm')
+assert.strictEqual(isMediaFile('photo.heic'), true, 'Should accept .heic')
+assert.strictEqual(isMediaFile('notes.pdf'), false, 'Should reject .pdf')
+console.log('✅ File extension & hidden file filtering passed')
 
 console.log('🎉 All automated tests passed successfully!')

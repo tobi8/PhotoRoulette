@@ -121,23 +121,29 @@ export async function savePhotosToVault(
 }
 
 /**
- * Get total count of photos stored in the local vault
+ * Get total count of media stored in the local vault, optionally filtered by mediaType
  */
-export async function getVaultCount(): Promise<number> {
+export async function getVaultCount(mediaType?: 'photos_only' | 'videos_only' | 'mixed'): Promise<number> {
   try {
-    const db = await getDB()
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readonly')
-      const store = tx.objectStore(STORE_NAME)
-      const countRequest = store.count()
+    if (!mediaType || mediaType === 'mixed') {
+      const db = await getDB()
+      return new Promise((resolve) => {
+        const tx = db.transaction(STORE_NAME, 'readonly')
+        const store = tx.objectStore(STORE_NAME)
+        const countRequest = store.count()
 
-      countRequest.onsuccess = () => {
-        resolve(countRequest.result || 0)
-      }
-      countRequest.onerror = () => {
-        resolve(0)
-      }
-    })
+        countRequest.onsuccess = () => {
+          resolve(countRequest.result || 0)
+        }
+        countRequest.onerror = () => {
+          resolve(0)
+        }
+      })
+    }
+    const all = await getAllVaultPhotos()
+    if (mediaType === 'photos_only') return all.filter((p) => p.type === 'image').length
+    if (mediaType === 'videos_only') return all.filter((p) => p.type === 'video').length
+    return all.length
   } catch {
     return 0
   }
@@ -168,12 +174,21 @@ export async function getAllVaultPhotos(): Promise<VaultPhoto[]> {
 }
 
 /**
- * Randomly sample up to `count` photos from the vault using Fisher-Yates
+ * Randomly sample up to `count` items from the vault matching mediaType using Fisher-Yates
  */
-export async function sampleRandomFromVault(count = 15): Promise<VaultPhoto[]> {
+export async function sampleRandomFromVault(
+  count = 15,
+  mediaType: 'photos_only' | 'videos_only' | 'mixed' = 'mixed'
+): Promise<VaultPhoto[]> {
   const allPhotos = await getAllVaultPhotos()
-  if (allPhotos.length === 0) return []
-  const shuffled = fisherYatesShuffle(allPhotos)
+  let pool = allPhotos
+  if (mediaType === 'photos_only') {
+    pool = allPhotos.filter((p) => p.type === 'image')
+  } else if (mediaType === 'videos_only') {
+    pool = allPhotos.filter((p) => p.type === 'video')
+  }
+  if (pool.length === 0) return []
+  const shuffled = fisherYatesShuffle(pool)
   return shuffled.slice(0, count)
 }
 

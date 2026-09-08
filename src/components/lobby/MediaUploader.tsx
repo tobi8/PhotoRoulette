@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo } from 'react'
 import {
   Upload,
   ShieldCheck,
@@ -17,6 +17,7 @@ import {
   Sparkles,
   Plus,
   Folder,
+  Film,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
@@ -34,17 +35,20 @@ import {
   fisherYatesShuffle,
 } from '../../services/photoVaultService'
 import { createFallbackPhotoCard } from '../../utils/imageCompression'
+import { getMockPartyPhotos, getMockPartyVideos, getMockPartyDeck } from '../../utils/mockData'
 
 interface MediaUploaderProps {
   onMediaReady: (mediaItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }>) => void
   isReady: boolean
   onToggleReady: () => void
+  mediaType?: 'photos_only' | 'videos_only' | 'mixed'
 }
 
 export const MediaUploader: React.FC<MediaUploaderProps> = ({
   onMediaReady,
   isReady,
   onToggleReady,
+  mediaType = 'mixed',
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
@@ -69,17 +73,75 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   } = useDocumentFilter()
 
 
-  // Check saved vault status on mount
+  // Check saved vault status on mount and whenever mediaType changes
   useEffect(() => {
     refreshVaultCount()
-  }, [])
+  }, [mediaType])
 
   const refreshVaultCount = async () => {
-    const count = await getVaultCount()
+    const count = await getVaultCount(mediaType)
     setVaultCount(count)
   }
 
-  // Handle camera roll selection: supports 50–100 photos at once, saves to IndexedDB Vault, and samples 15
+  // Align active deck when mediaType setting changes (Photos Only, Videos Only, Mixed)
+  useEffect(() => {
+    if (items.length > 0) {
+      if (mediaType === 'videos_only') {
+        const onlyVideos = items.filter((i) => !i.isExcluded && i.type === 'video')
+        if (onlyVideos.length > 0) {
+          onMediaReady(onlyVideos.map((v) => ({ id: v.id, ownerId: '', ownerName: '', type: v.type, dataUrl: v.dataUrl })))
+        } else {
+          sampleRandomFromVault(15, 'videos_only').then((vaultVideos) => {
+            if (vaultVideos.length > 0) {
+              loadExistingMedia(vaultVideos)
+              onMediaReady(vaultVideos.map((v) => ({ id: v.id, ownerId: '', ownerName: '', type: v.type, dataUrl: v.dataUrl })))
+            } else {
+              const mockVids = getMockPartyVideos()
+              loadExistingMedia(mockVids)
+              onMediaReady(mockVids.map((v) => ({ id: v.id, ownerId: '', ownerName: '', type: v.type, dataUrl: v.dataUrl })))
+            }
+          })
+        }
+      } else if (mediaType === 'photos_only') {
+        const onlyPhotos = items.filter((i) => !i.isExcluded && i.type === 'image')
+        if (onlyPhotos.length > 0) {
+          onMediaReady(onlyPhotos.map((p) => ({ id: p.id, ownerId: '', ownerName: '', type: p.type, dataUrl: p.dataUrl })))
+        } else {
+          sampleRandomFromVault(15, 'photos_only').then((vaultPhotos) => {
+            if (vaultPhotos.length > 0) {
+              loadExistingMedia(vaultPhotos)
+              onMediaReady(vaultPhotos.map((p) => ({ id: p.id, ownerId: '', ownerName: '', type: p.type, dataUrl: p.dataUrl })))
+            } else {
+              const mockPhotos = getMockPartyPhotos()
+              loadExistingMedia(mockPhotos)
+              onMediaReady(mockPhotos.map((p) => ({ id: p.id, ownerId: '', ownerName: '', type: p.type, dataUrl: p.dataUrl })))
+            }
+          })
+        }
+      } else {
+        // 'mixed' mode: Ensure BOTH photos and videos are present in active deck
+        const hasVideos = items.some((i) => !i.isExcluded && i.type === 'video')
+        const hasPhotos = items.some((i) => !i.isExcluded && i.type === 'image')
+        if (!hasVideos || !hasPhotos) {
+          sampleRandomFromVault(15, 'mixed').then((mixed) => {
+            if (mixed.length > 0 && mixed.some((m) => m.type === 'video') && mixed.some((m) => m.type === 'image')) {
+              loadExistingMedia(mixed)
+              onMediaReady(mixed.map((m) => ({ id: m.id, ownerId: '', ownerName: '', type: m.type, dataUrl: m.dataUrl })))
+            } else {
+              const mixedMock = getMockPartyDeck('mixed')
+              loadExistingMedia(mixedMock)
+              onMediaReady(mixedMock.map((m) => ({ id: m.id, ownerId: '', ownerName: '', type: m.type, dataUrl: m.dataUrl })))
+            }
+          })
+        } else {
+          const approved = items.filter((i) => !i.isExcluded)
+          onMediaReady(approved.map((m) => ({ id: m.id, ownerId: '', ownerName: '', type: m.type, dataUrl: m.dataUrl })))
+        }
+      }
+    }
+  }, [mediaType])
+
+  // Handle camera roll selection: supports 50–100 photos/videos at once, saves to IndexedDB Vault, and samples 15
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       let filesArray = Array.from(e.target.files)
@@ -87,7 +149,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       // Randomly shuffle all incoming files first using Fisher-Yates
       filesArray = fisherYatesShuffle(filesArray)
 
-      // Support up to 100 photos in one upload batch
+      // Support up to 100 media items in one upload batch
       if (filesArray.length > 100) {
         filesArray = filesArray.slice(0, 100)
       }
@@ -96,7 +158,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       const { accepted } = await processFiles(filesArray)
 
       if (accepted.length > 0) {
-        // Automatically save all clean accepted photos into device's persistent IndexedDB vault
+        // Automatically save all clean accepted media into device's persistent IndexedDB vault
         await savePhotosToVault(
           accepted.map((m) => ({
             id: m.id,
@@ -104,14 +166,17 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             dataUrl: m.dataUrl,
           }))
         )
-        const updatedCount = await getVaultCount()
-        setVaultCount(updatedCount)
+        await refreshVaultCount()
 
-        // Sample 15 for the current active game using Fisher-Yates
-        const activeSample = await sampleRandomFromVault(15)
-        loadExistingMedia(activeSample)
+        // Sample 15 matching mediaType for the current active game
+        const activeSample = await sampleRandomFromVault(15, mediaType)
+        const filteredAccepted = accepted.filter((m) =>
+          mediaType === 'videos_only' ? m.type === 'video' : mediaType === 'photos_only' ? m.type === 'image' : true
+        )
+        const finalDeck = activeSample.length > 0 ? activeSample : filteredAccepted.slice(0, 15)
+        loadExistingMedia(finalDeck)
 
-        const mapped = activeSample.map((s) => ({
+        const mapped = finalDeck.map((s) => ({
           id: s.id,
           ownerId: '',
           ownerName: '',
@@ -125,7 +190,8 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           onToggleReady()
         }
 
-        setVaultMessage(`🎉 ${accepted.length} photos saved to your Vault! Total pool: ${updatedCount} photos.`)
+        const label = mediaType === 'videos_only' ? 'videos' : mediaType === 'photos_only' ? 'photos' : 'items'
+        setVaultMessage(`🎉 ${accepted.length} ${label} saved to your Vault! Total pool: ${vaultCount + accepted.length}`)
         setTimeout(() => setVaultMessage(null), 4500)
       }
     }
@@ -147,13 +213,16 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           dataUrl: m.dataUrl,
         }))
       )
-      const updatedCount = await getVaultCount()
-      setVaultCount(updatedCount)
+      await refreshVaultCount()
 
-      const activeSample = await sampleRandomFromVault(15)
-      loadExistingMedia(activeSample)
+      const activeSample = await sampleRandomFromVault(15, mediaType)
+      const filteredAccepted = accepted.filter((m) =>
+        mediaType === 'videos_only' ? m.type === 'video' : mediaType === 'photos_only' ? m.type === 'image' : true
+      )
+      const finalDeck = activeSample.length > 0 ? activeSample : filteredAccepted.slice(0, 15)
+      loadExistingMedia(finalDeck)
 
-      const mapped = activeSample.map((s) => ({
+      const mapped = finalDeck.map((s) => ({
         id: s.id,
         ownerId: '',
         ownerName: '',
@@ -166,15 +235,18 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         onToggleReady()
       }
 
-      setVaultMessage(`🎉 ${accepted.length} photos imported from folder & saved to Vault! Total pool: ${updatedCount}`)
+      const label = mediaType === 'videos_only' ? 'videos' : mediaType === 'photos_only' ? 'photos' : 'items'
+      setVaultMessage(`🎉 ${accepted.length} ${label} imported from folder & saved to Vault!`)
+      setTimeout(() => setVaultMessage(null), 4500)
+    } else {
+      setVaultMessage(`⚠️ No valid media could be imported from folder.`)
       setTimeout(() => setVaultMessage(null), 4500)
     }
   }
 
-
   // 1-Tap Mystery Roll from persistent IndexedDB Vault
   const handleRollFromVault = async () => {
-    const sampled = await sampleRandomFromVault(15)
+    const sampled = await sampleRandomFromVault(15, mediaType)
     if (sampled.length > 0) {
       loadExistingMedia(sampled)
       const mapped = sampled.map((s) => ({
@@ -188,14 +260,37 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       if (!isReady) {
         onToggleReady()
       }
-      setVaultMessage(`🎲 Rolled 15 Mystery Photos from your ${vaultCount} saved photos!`)
+      const label = mediaType === 'videos_only' ? 'Videos' : mediaType === 'photos_only' ? 'Photos' : 'Photos & Videos'
+      setVaultMessage(`🎲 Rolled ${sampled.length} Mystery ${label} from your saved vault!`)
       setTimeout(() => setVaultMessage(null), 3000)
+    } else {
+      // If vault doesn't have media matching this type, load built-in party pack!
+      if (mediaType === 'videos_only') {
+        const mockVids = getMockPartyVideos()
+        loadExistingMedia(mockVids)
+        onMediaReady(mockVids.map((v) => ({ id: v.id, ownerId: '', ownerName: '', type: v.type, dataUrl: v.dataUrl })))
+        if (!isReady) onToggleReady()
+        setVaultMessage(`🎬 Rolled Party Videos! (Upload your own videos anytime)`)
+        setTimeout(() => setVaultMessage(null), 3500)
+      } else if (mediaType === 'mixed') {
+        const mockMixed = getMockPartyDeck('mixed')
+        loadExistingMedia(mockMixed)
+        onMediaReady(mockMixed.map((m) => ({ id: m.id, ownerId: '', ownerName: '', type: m.type, dataUrl: m.dataUrl })))
+        if (!isReady) onToggleReady()
+        setVaultMessage(`✨ Rolled Mystery Mixed Deck (Photos + Videos)!`)
+        setTimeout(() => setVaultMessage(null), 3500)
+      } else {
+        const mockPhotos = getMockPartyPhotos()
+        loadExistingMedia(mockPhotos)
+        onMediaReady(mockPhotos.map((p) => ({ id: p.id, ownerId: '', ownerName: '', type: p.type, dataUrl: p.dataUrl })))
+        if (!isReady) onToggleReady()
+      }
     }
   }
 
   // Clear local device vault
   const handleClearVault = async () => {
-    if (window.confirm('Delete all saved photos from this device? You can upload a new batch anytime.')) {
+    if (window.confirm('Delete all saved photos & videos from this device? You can upload a new batch anytime.')) {
       await clearVault()
       await refreshVaultCount()
       setVaultMessage('Photo Vault cleared successfully.')
@@ -205,9 +300,9 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   // 1-Tap Instant Auto-Roll (Demo / Mock)
   const handleInstantAutoRoll = async () => {
-    await loadMockPhotosWithTestDocument()
+    await loadMockPhotosWithTestDocument(mediaType)
     setTimeout(() => {
-      const approved = getApprovedMedia()
+      const approved = getApprovedMedia(mediaType)
       onMediaReady(approved)
       if (!isReady) {
         onToggleReady()
@@ -217,9 +312,8 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   // Reroll photos in roulette pool
   const handleReroll = async () => {
-    if (vaultCount >= 15) {
-      // Re-sample 15 random photos from the vault pool
-      const freshSample = await sampleRandomFromVault(15)
+    const freshSample = await sampleRandomFromVault(15, mediaType)
+    if (freshSample.length > 0) {
       loadExistingMedia(freshSample)
       const mapped = freshSample.map((s) => ({
         id: s.id,
@@ -232,7 +326,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     } else {
       rerollDeck()
       setTimeout(() => {
-        onMediaReady(getApprovedMedia())
+        onMediaReady(getApprovedMedia(mediaType))
       }, 50)
     }
   }
@@ -241,34 +335,47 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     e.stopPropagation()
     removePhoto(id)
 
-    // If there are more photos in the vault, immediately draw a replacement so player still has a full deck
+    // If there are more items in the vault, immediately draw a replacement
     if (vaultCount > items.length) {
-      const allPhotos = await getAllVaultPhotos()
+      const allMedia = await getAllVaultPhotos()
       const currentIds = new Set(items.map((i) => i.id))
-      const available = allPhotos.filter((p) => !currentIds.has(p.id) && p.id !== id)
+      const available = allMedia.filter(
+        (p) =>
+          !currentIds.has(p.id) &&
+          p.id !== id &&
+          (mediaType === 'videos_only' ? p.type === 'video' : mediaType === 'photos_only' ? p.type === 'image' : true)
+      )
       if (available.length > 0) {
         const replacement = available[Math.floor(Math.random() * available.length)]
         const remaining = items.filter((i) => i.id !== id)
         loadExistingMedia([...remaining, replacement])
         setTimeout(() => {
-          onMediaReady(getApprovedMedia())
+          onMediaReady(getApprovedMedia(mediaType))
         }, 50)
         return
       }
     }
 
     setTimeout(() => {
-      onMediaReady(getApprovedMedia())
+      onMediaReady(getApprovedMedia(mediaType))
     }, 50)
   }
 
   const handleConfirmReview = () => {
     setIsPreviewModalOpen(false)
-    const approved = getApprovedMedia()
+    const approved = getApprovedMedia(mediaType)
     onMediaReady(approved)
   }
 
-  const approvedItems = items.filter((i) => !i.isExcluded)
+  const approvedItems = useMemo(() => {
+    let list = items.filter((i) => !i.isExcluded)
+    if (mediaType === 'videos_only') {
+      list = list.filter((i) => i.type === 'video')
+    } else if (mediaType === 'photos_only') {
+      list = list.filter((i) => i.type === 'image')
+    }
+    return list
+  }, [items, mediaType])
 
   const handleCameraRollClick = async () => {
     if (isNativeApp()) {
@@ -292,8 +399,16 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       <div className="flex items-center justify-between pb-2 border-b border-white/10">
         <div>
           <h3 className="font-bold text-white text-base flex items-center gap-2">
-            <span>Persistent Photo Vault</span>
-            <span className="text-xl">💾</span>
+            <span>
+              {mediaType === 'videos_only'
+                ? 'Persistent Video Vault'
+                : mediaType === 'photos_only'
+                ? 'Persistent Photo Vault'
+                : 'Persistent Media Vault'}
+            </span>
+            <span className="text-xl">
+              {mediaType === 'videos_only' ? '🎥' : mediaType === 'photos_only' ? '💾' : '✨'}
+            </span>
           </h3>
           <p className="text-xs text-gray-400 mt-0.5">
             Upload once • 100% private in browser storage • 1-tap play forever
@@ -302,7 +417,12 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
         {vaultCount > 0 && (
           <Badge variant="success" size="md">
-            💾 {vaultCount} in Vault
+            {mediaType === 'videos_only'
+              ? `🎥 ${vaultCount} Videos`
+              : mediaType === 'photos_only'
+              ? `💾 ${vaultCount} Photos`
+              : `✨ ${vaultCount} Items`}{' '}
+            in Vault
           </Badge>
         )}
       </div>
@@ -312,7 +432,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/*,video/*"
+        accept={
+          mediaType === 'videos_only'
+            ? 'video/*,.mp4,.mov,.m4v,.webm,.avi,.mkv'
+            : mediaType === 'photos_only'
+            ? 'image/*,.heic,.heif'
+            : 'image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm'
+        }
         className="hidden"
         onChange={handleFileChange}
       />
@@ -337,13 +463,19 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400 text-lg shadow-inner">
-                    💾
+                    {mediaType === 'videos_only' ? '🎥' : mediaType === 'photos_only' ? '💾' : '✨'}
                   </div>
                   <div>
                     <div className="text-sm font-black text-white flex items-center gap-2">
-                      <span>Saved Photo Vault</span>
+                      <span>
+                        {mediaType === 'videos_only'
+                          ? 'Saved Video Vault'
+                          : mediaType === 'photos_only'
+                          ? 'Saved Photo Vault'
+                          : 'Saved Media Vault'}
+                      </span>
                       <span className="px-2 py-0.5 text-xs bg-emerald-500/25 text-emerald-300 rounded-full font-mono font-bold border border-emerald-500/30">
-                        {vaultCount} Photos
+                        {vaultCount} {mediaType === 'videos_only' ? 'Videos' : mediaType === 'photos_only' ? 'Photos' : 'Items'}
                       </span>
                     </div>
                     <div className="text-[11px] text-emerald-200/70">
@@ -370,7 +502,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 text-sm py-3.5 font-black shadow-lg shadow-emerald-950/60 active:scale-98"
               >
                 <Sparkles size={18} className="text-amber-300 animate-pulse" />
-                <span>⚡ Roll 15 Mystery Photos</span>
+                <span>
+                  {mediaType === 'videos_only'
+                    ? '⚡ Roll 15 Mystery Videos'
+                    : mediaType === 'photos_only'
+                    ? '⚡ Roll 15 Mystery Photos'
+                    : '⚡ Roll 15 Mystery Media (Mixed)'}
+                </span>
               </Button>
 
               <div className="grid grid-cols-2 gap-2">
@@ -380,7 +518,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                   onClick={() => fileInputRef.current?.click()}
                   className="border-white/10 text-xs py-2 text-gray-300 hover:text-white"
                 >
-                  <Plus size={14} /> Add Photos
+                  <Plus size={14} /> {mediaType === 'videos_only' ? 'Add Videos' : mediaType === 'photos_only' ? 'Add Photos' : 'Add Media'}
                 </Button>
                 <Button
                   variant="outline"
@@ -393,21 +531,27 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               </div>
             </div>
           ) : (
-            /* First Time Setup: Upload 50-100 Photos into Vault */
+            /* First Time Setup: Upload Photos/Videos into Vault */
             <div className="space-y-2">
               <button
                 onClick={handleCameraRollClick}
                 className="w-full p-6 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
               >
                 <div className="w-14 h-14 rounded-2xl bg-violet-600/40 flex items-center justify-center text-violet-200 border border-violet-400/40 shadow-inner">
-                  <Camera size={28} className="animate-pulse" />
+                  {mediaType === 'videos_only' ? <Film size={28} className="animate-pulse" /> : <Camera size={28} className="animate-pulse" />}
                 </div>
                 <div className="text-center">
                   <div className="font-black text-white text-base">
-                    📱 Select 50–100 Photos (Upload Once)
+                    {mediaType === 'videos_only'
+                      ? '🎥 Select 10–30 Videos (Upload Once)'
+                      : mediaType === 'photos_only'
+                      ? '📱 Select 50–100 Photos (Upload Once)'
+                      : '✨ Select Photos & Videos (Upload Once)'}
                   </div>
                   <div className="text-xs text-violet-300/80 mt-1 max-w-xs">
-                    Swipe-select photos once. Stored locally in your browser's Photo Vault for instant 1-tap play forever!
+                    {mediaType === 'videos_only'
+                      ? "Select videos once. Stored locally in your device's Video Vault for instant 1-tap play!"
+                      : "Swipe-select photos once. Stored locally in your browser's Photo Vault for instant 1-tap play forever!"}
                   </div>
                 </div>
               </button>
@@ -441,7 +585,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             className="border-violet-500/30 text-xs text-violet-200 py-3"
           >
             <Shuffle size={16} className="text-amber-400" />
-            <span>⚡ Instant Demo Memories (Try Game Now)</span>
+            <span>
+              {mediaType === 'videos_only'
+                ? '⚡ Instant Demo Videos (Try Game Now)'
+                : mediaType === 'photos_only'
+                ? '⚡ Instant Demo Photos (Try Game Now)'
+                : '⚡ Instant Demo Memories (Photos & Videos)'}
+            </span>
           </Button>
         </div>
       )}
@@ -454,7 +604,11 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             <div className="flex items-center justify-between text-xs text-gray-300 font-bold mb-1.5 px-1">
               <div className="flex items-center gap-1.5">
                 <span className="text-violet-300 font-black">
-                  📸 Selected Photos ({approvedItems.length})
+                  {mediaType === 'videos_only'
+                    ? `🎬 Selected Videos (${approvedItems.length})`
+                    : mediaType === 'photos_only'
+                    ? `📸 Selected Photos (${approvedItems.length})`
+                    : `✨ Selected Media (${approvedItems.length})`}
                 </span>
                 <span className="text-[10px] text-gray-400 font-normal">
                   (tap to enlarge)
@@ -471,7 +625,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 {isSecretMode ? (
                   <>
                     <Eye size={12} className="text-amber-400" />
-                    <span>Show Photos</span>
+                    <span>Show Media</span>
                   </>
                 ) : (
                   <>
@@ -495,7 +649,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                     src={item.previewUrl || item.dataUrl}
                     alt=""
                     onError={(e) => {
-                      e.currentTarget.src = createFallbackPhotoCard(`Photo #${idx + 1}`)
+                      e.currentTarget.src = createFallbackPhotoCard(item.type === 'video' ? `Video #${idx + 1}` : `Photo #${idx + 1}`)
                     }}
                     className={`w-full h-full object-cover transition-all duration-300 ${
                       isSecretMode
@@ -522,7 +676,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                   <button
                     onClick={(e) => handleRemoveSingle(item.id, e)}
                     className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/80 hover:bg-red-600 text-white flex items-center justify-center text-xs transition-colors cursor-pointer shadow-md"
-                    title="Veto photo (swap with another)"
+                    title="Veto item (swap with another)"
                   >
                     <X size={12} />
                   </button>
@@ -541,7 +695,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               onClick={() => setIsPreviewModalOpen(true)}
             >
               <Eye size={15} className="text-violet-400" />
-              <span>🔍 Inspect Photos ({approvedItems.length})</span>
+              <span>
+                {mediaType === 'videos_only'
+                  ? `🔍 Inspect Videos (${approvedItems.length})`
+                  : mediaType === 'photos_only'
+                  ? `🔍 Inspect Photos (${approvedItems.length})`
+                  : `🔍 Inspect Media (${approvedItems.length})`}
+              </span>
             </Button>
 
             <Button

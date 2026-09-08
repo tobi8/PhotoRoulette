@@ -222,48 +222,69 @@ export function useDocumentFilter() {
   /**
    * Load mock demo photos (including one mock receipt) with automatic AI scan
    */
-  const loadMockPhotosWithTestDocument = useCallback(async () => {
-    setIsScanning(true)
-    setProgress({ current: 0, total: 6, status: 'Generating demo party deck...' })
+  const loadMockPhotosWithTestDocument = useCallback(
+    async (mediaType: 'photos_only' | 'videos_only' | 'mixed' = 'mixed') => {
+      setIsScanning(true)
+      setProgress({ current: 0, total: 6, status: 'Generating demo party deck...' })
 
-    const { getMockPartyPhotos, generateMockPhoto } = await import('../utils/mockData')
-    const partyItems = getMockPartyPhotos().slice(0, 5)
+      const { getMockPartyPhotos, getMockPartyVideos, getMockPartyDeck, generateMockPhoto } = await import(
+        '../utils/mockData'
+      )
 
-    // Generate one simulated receipt
-    const mockReceipt = {
-      id: `mock-doc-${Date.now()}`,
-      type: 'image' as const,
-      dataUrl: generateMockPhoto('Mock Receipt', '#ffffff', '🧾', true),
-    }
+      let partyItems: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string }> = []
+      if (mediaType === 'videos_only') {
+        partyItems = getMockPartyVideos()
+      } else if (mediaType === 'photos_only') {
+        partyItems = getMockPartyPhotos().slice(0, 5)
+      } else {
+        partyItems = getMockPartyDeck('mixed').slice(0, 6)
+      }
 
-    const allToScan = [...partyItems, mockReceipt]
-    const scanned: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
+      // Generate one simulated receipt for photo/mixed modes
+      const mockReceipt: { id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string } | null =
+        mediaType !== 'videos_only'
+          ? {
+              id: `mock-doc-${Date.now()}`,
+              type: 'image' as const,
+              dataUrl: generateMockPhoto('Mock Receipt', '#ffffff', '🧾', true),
+              previewUrl: generateMockPhoto('Mock Receipt', '#ffffff', '🧾', true),
+            }
+          : null
 
-    for (let i = 0; i < allToScan.length; i++) {
-      const item = allToScan[i]
-      setProgress({
-        current: i + 1,
-        total: allToScan.length,
-        status: `Analyzing photo ${i + 1} of ${allToScan.length}...`,
-      })
-      const heuristic = await analyzeImageHeuristics(item.dataUrl)
-      scanned.push({
-        id: item.id,
-        previewUrl: item.dataUrl,
-        dataUrl: item.dataUrl,
-        type: item.type,
-        reason: heuristic.isDocument
-          ? 'Store receipt / invoice automatically detected by document scanner'
-          : 'Verified safe photo',
-        confidence: heuristic.confidence,
-        isExcluded: heuristic.isDocument,
-      })
-    }
+      const allToScan = mockReceipt ? [...partyItems, mockReceipt] : [...partyItems]
+      const scanned: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
 
-    setItems(scanned)
-    setIsScanning(false)
-    setProgress({ current: allToScan.length, total: allToScan.length, status: 'Demo pack loaded!' })
-  }, [])
+      for (let i = 0; i < allToScan.length; i++) {
+        const item = allToScan[i]
+        setProgress({
+          current: i + 1,
+          total: allToScan.length,
+          status: `Analyzing media ${i + 1} of ${allToScan.length}...`,
+        })
+        const heuristic =
+          item.type === 'video'
+            ? { isDocument: false, confidence: 0, reason: 'Video party clip' }
+            : await analyzeImageHeuristics(item.dataUrl)
+
+        scanned.push({
+          id: item.id,
+          previewUrl: item.previewUrl || item.dataUrl,
+          dataUrl: item.dataUrl,
+          type: item.type,
+          reason: heuristic.isDocument
+            ? 'Store receipt / invoice automatically detected by document scanner'
+            : 'Verified safe photo',
+          confidence: heuristic.confidence,
+          isExcluded: heuristic.isDocument,
+        })
+      }
+
+      setItems(scanned)
+      setIsScanning(false)
+      setProgress({ current: allToScan.length, total: allToScan.length, status: 'Demo pack loaded!' })
+    },
+    []
+  )
 
   /**
    * Loads pre-approved photos/videos (e.g. from local Persistent Vault) directly into state
@@ -310,15 +331,20 @@ export function useDocumentFilter() {
     rerollDeck,
     acceptedCount,
     excludedCount,
-    getApprovedMedia: (): MediaItem[] =>
-      items
-        .filter((i) => !i.isExcluded)
-        .map((i) => ({
-          id: i.id,
-          ownerId: '',
-          ownerName: '',
-          type: i.type,
-          dataUrl: i.dataUrl,
-        })),
+    getApprovedMedia: (mediaType?: 'photos_only' | 'videos_only' | 'mixed'): MediaItem[] => {
+      let unexcluded = items.filter((i) => !i.isExcluded)
+      if (mediaType === 'videos_only') {
+        unexcluded = unexcluded.filter((i) => i.type === 'video')
+      } else if (mediaType === 'photos_only') {
+        unexcluded = unexcluded.filter((i) => i.type === 'image')
+      }
+      return unexcluded.map((i) => ({
+        id: i.id,
+        ownerId: '',
+        ownerName: '',
+        type: i.type,
+        dataUrl: i.dataUrl,
+      }))
+    },
   }
 }

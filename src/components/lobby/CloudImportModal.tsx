@@ -42,11 +42,16 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
   const handleFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const allFiles = Array.from(e.target.files)
+      // Reset input value so the same folder can be re-selected if desired
+      e.target.value = ''
 
-      // Filter only image and video files (including HEIC / HEIF)
+      // Filter only image and video files (ignoring hidden metadata files like .DS_Store or ._foo)
       const mediaFiles = allFiles.filter((f) => {
+        if (f.name.startsWith('.') || f.size === 0) return false
         const isMediaMime = f.type.startsWith('image/') || f.type.startsWith('video/')
-        const isMediaExt = /\.(jpe?g|png|webp|gif|heic|heif|mp4|mov|m4v)$/i.test(f.name)
+        const isMediaExt = /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif|avif|mp4|mov|m4v|webm|avi|mkv|3gp|ogv)$/i.test(
+          f.name
+        )
         return isMediaMime || isMediaExt
       })
 
@@ -55,21 +60,11 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
         return
       }
 
-      setIsProcessing(true)
       setErrorMessage(null)
-      try {
-        const shuffled = fisherYatesShuffle(mediaFiles)
-        await onImportFiles(shuffled)
-        setSuccessMessage(`Imported ${mediaFiles.length} photos from folder!`)
-        setTimeout(() => {
-          onClose()
-          setSuccessMessage(null)
-          setIsProcessing(false)
-        }, 1200)
-      } catch {
-        setErrorMessage('Failed to import folder photos.')
-        setIsProcessing(false)
-      }
+      const shuffled = fisherYatesShuffle(mediaFiles)
+      // Close modal immediately so the user sees the live DocumentScanner progress in the lobby
+      onClose()
+      await onImportFiles(shuffled)
     }
   }
 
@@ -78,10 +73,7 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
     e.preventDefault()
     e.stopPropagation()
     setIsDragging(false)
-
-    setIsProcessing(true)
     setErrorMessage(null)
-    setPickerStatus('Reading dropped files...')
 
     try {
       const files: File[] = []
@@ -101,31 +93,24 @@ export const CloudImportModal: React.FC<CloudImportModalProps> = ({
       }
 
       const mediaFiles = files.filter((f) => {
+        if (f.name.startsWith('.') || f.size === 0) return false
         const isMediaMime = f.type.startsWith('image/') || f.type.startsWith('video/')
-        const isMediaExt = /\.(jpe?g|png|webp|gif|heic|heif|mp4|mov|m4v)$/i.test(f.name)
+        const isMediaExt = /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif|avif|mp4|mov|m4v|webm|avi|mkv|3gp|ogv)$/i.test(
+          f.name
+        )
         return isMediaMime || isMediaExt
       })
 
       if (mediaFiles.length === 0) {
-        setErrorMessage('No photos found in the dropped items.')
-        setIsProcessing(false)
-        setPickerStatus(null)
+        setErrorMessage('No photos or videos found in the dropped items.')
         return
       }
 
       const shuffled = fisherYatesShuffle(mediaFiles)
+      onClose()
       await onImportFiles(shuffled)
-      setSuccessMessage(`Imported ${mediaFiles.length} photos successfully!`)
-      setTimeout(() => {
-        onClose()
-        setSuccessMessage(null)
-        setIsProcessing(false)
-        setPickerStatus(null)
-      }, 1200)
     } catch {
       setErrorMessage('Failed to read dropped files.')
-      setIsProcessing(false)
-      setPickerStatus(null)
     }
   }
 
