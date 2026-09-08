@@ -10,6 +10,9 @@ import {
   Trash2,
   Eye,
   PlayCircle,
+  Download,
+  Send,
+  ExternalLink,
 } from "lucide-react"
 import { Button } from "../ui/Button"
 import { Badge } from "../ui/Badge"
@@ -32,6 +35,24 @@ interface MediaUploaderProps {
   userId?: string
 }
 
+const SHORTCUT_LINKS: Record<string, { name: string; url: string; label: string }> = {
+  photos_only: {
+    name: "PhotoRouletteUpload",
+    url: "https://www.icloud.com/shortcuts/bb1707211c824566ab3e70263be68c57",
+    label: "Photos",
+  },
+  videos_only: {
+    name: "PhotoRouletteUpload(Videos)",
+    url: "https://www.icloud.com/shortcuts/84b4fa92547643efba2a581f15ddfd94",
+    label: "Videos",
+  },
+  mixed: {
+    name: "PhotoRouletteUpload(Mixed)",
+    url: "https://www.icloud.com/shortcuts/fb672669f9364dc2acfffcd770067137",
+    label: "Mixed",
+  },
+}
+
 export const MediaUploader: React.FC<MediaUploaderProps> = ({
   onMediaReady,
   isReady,
@@ -47,6 +68,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
   const isNativeAndroid = useMemo(() => hasAndroidBridge(), [])
+  const activeShortcut = SHORTCUT_LINKS[mediaType] || SHORTCUT_LINKS.mixed
 
   const {
     items,
@@ -80,11 +102,26 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     return () => window.removeEventListener("paste", handleGlobalPaste)
   }, [items, isReady, onMediaReady, onToggleReady, loadExistingMedia])
 
+  // Show a reminder when switching back to Safari from the Shortcuts app
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && items.length === 0) {
+        setStatusMessage("💡 Back from Shortcuts? Tap 'Paste 20 Photos' below to load them!")
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("focus", handleVisibility)
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("focus", handleVisibility)
+    }
+  }, [items.length])
+
   // Process a list of File objects locally with Canvas GPU compression
   const processAndLoadFiles = async (fileList: File[]) => {
     if (fileList.length === 0) return
     setIsPreparing(true)
-    setStatusMessage(`⚡ Loading ${fileList.length} items on device...`)
+    setStatusMessage(`⚡ Processing ${fileList.length} items directly on device...`)
 
     try {
       // Pick up to 20 random items if more than 20 were selected
@@ -175,6 +212,15 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
+  // Run iOS Apple Shortcut
+  const handleRunShortcut = () => {
+    const shortcutName = encodeURIComponent(activeShortcut.name)
+      .replace(/\(/g, "%28")
+      .replace(/\)/g, "%29")
+    window.location.href = `shortcuts://run-shortcut?name=${shortcutName}`
+    setStatusMessage("Running shortcut... After it finishes, tap 'Paste 20 Photos' below!")
+  }
+
   // Android Native 1-Tap pick (only inside APK)
   const handleAndroidNativePick20 = async () => {
     setIsPreparing(true)
@@ -260,13 +306,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       <div className="flex items-center justify-between pb-2 border-b border-white/10">
         <div>
           <h3 className="font-bold text-white text-base flex items-center gap-2">
-            <span>Photo Setup</span>
+            <span>{activeShortcut.label} Setup</span>
             <span className="text-xl">
               {mediaType === "videos_only" ? "🎥" : mediaType === "photos_only" ? "📸" : "✨"}
             </span>
           </h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            Instant local loading • Zero network upload • 100% private
+            Auto-pick 20 random items • Zero network upload • Instant
           </p>
         </div>
 
@@ -354,65 +400,99 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </>
           )}
 
-          {/* OPTION 2: 📋 Instant Paste from Clipboard (iOS & Web) */}
+          {/* BUTTON 1: 📲 1-Tap Run Shortcut (for iOS) */}
           <button
             type="button"
-            onClick={handlePasteFromClipboard}
+            onClick={handleRunShortcut}
             disabled={isPreparing}
             className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-blue-950/40 active:scale-98 text-left disabled:opacity-50"
           >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                <Clipboard size={24} />
+                <Send size={22} />
               </div>
               <div>
                 <div className="font-extrabold text-white text-base">
-                  📋 Paste 20 Photos from Clipboard
+                  📲 Pick 20 via iOS Shortcut
                 </div>
                 <div className="text-xs text-blue-200/90 font-normal mt-0.5">
-                  Copy photos in Photos app → Tap here • 0s upload
+                  1-tap auto-picks 20 random {activeShortcut.label.toLowerCase()} on iPhone
                 </div>
               </div>
             </div>
-            <span className="text-xs bg-white/20 text-white px-3 py-1.5 rounded-full font-bold shrink-0">
+            <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-bold shrink-0">
+              Run
+            </span>
+          </button>
+
+          {/* BUTTON 2: 📋 Paste 20 Photos from Clipboard */}
+          <button
+            type="button"
+            onClick={handlePasteFromClipboard}
+            disabled={isPreparing}
+            className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-emerald-600/80 via-teal-600/80 to-cyan-600/80 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 cursor-pointer shadow-md active:scale-98 text-left disabled:opacity-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                <Clipboard size={20} />
+              </div>
+              <div>
+                <div className="font-bold text-white text-sm">
+                  📋 Paste 20 Photos from Clipboard
+                </div>
+                <div className="text-[11px] text-emerald-100/90 font-normal mt-0.5">
+                  Paste photos copied by the Shortcut • Instant 0s upload
+                </div>
+              </div>
+            </div>
+            <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-bold shrink-0">
               Paste
             </span>
           </button>
 
-          {/* OPTION 3: 📱 Select from Library (Direct in Safari/Chrome) */}
+          {/* BUTTON 3: 📥 Install Apple Shortcut (for new devices joining) */}
+          <a
+            href={activeShortcut.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full p-3.5 rounded-2xl bg-violet-950/50 hover:bg-violet-900/60 border border-violet-500/30 text-violet-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98 shadow-sm cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-violet-600/25 border border-violet-400/30 flex items-center justify-center text-violet-300 shrink-0">
+                <Download size={18} />
+              </div>
+              <div>
+                <div className="font-bold text-white text-sm">📥 Install Apple Shortcut</div>
+                <div className="text-[11px] text-violet-300/70 font-normal mt-0.5">
+                  First time on this iPhone? Tap to add &ldquo;{activeShortcut.name}&rdquo;
+                </div>
+              </div>
+            </div>
+            <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold shrink-0 flex items-center gap-1">
+              Install <ExternalLink size={10} />
+            </span>
+          </a>
+
+          {/* BUTTON 4: 📱 Manual fallback picker */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={isPreparing}
-            className="w-full p-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98 cursor-pointer disabled:opacity-50"
+            className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-medium flex items-center justify-between gap-3 transition-all active:scale-98 cursor-pointer disabled:opacity-50"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-violet-600/30 border border-violet-400/30 flex items-center justify-center text-violet-300 shrink-0">
-                <ImageIcon size={18} />
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-gray-300 shrink-0">
+                <ImageIcon size={16} />
               </div>
-              <div>
-                <div className="font-bold text-white text-sm">📱 Select from Photo Library</div>
-                <div className="text-[11px] text-gray-400 font-normal mt-0.5">
-                  Choose photos or album • Auto-picks 20 random items
-                </div>
+              <div className="text-left">
+                <div className="text-white text-xs font-semibold">Or Select from Photo Library</div>
+                <div className="text-[10px] text-gray-400">Manual selection without Shortcuts</div>
               </div>
             </div>
-            <span className="text-[10px] bg-white/10 text-gray-300 px-2.5 py-1 rounded-full font-bold shrink-0">
+            <span className="text-[10px] bg-white/10 text-gray-300 px-2.5 py-1 rounded-full font-medium shrink-0">
               Browse
             </span>
           </button>
-
-          {/* Helpful 3-Step Shortcut tip for iOS users */}
-          <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-white/5 text-[11px] text-gray-400 space-y-1.5">
-            <div className="font-bold text-violet-300 flex items-center gap-1.5 text-xs">
-              <span>💡 For 100% Random 20 Photos on iPhone:</span>
-            </div>
-            <ol className="list-decimal list-inside space-y-0.5 text-gray-300">
-              <li>In Apple Shortcuts: <b>Find Photos</b> (Random, Limit 20)</li>
-              <li>Add action: <b>Copy to Clipboard</b></li>
-              <li>Switch back here & tap <b>Paste</b> above!</li>
-            </ol>
-          </div>
         </div>
       ) : (
         <div className="space-y-3">
