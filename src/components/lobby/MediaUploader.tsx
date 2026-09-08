@@ -56,7 +56,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     try {
       const searchParams = new URLSearchParams(window.location.search)
       if (searchParams.get("source") === "shortcut") return true
-      return sessionStorage.getItem("pending_paste") === "true"
+      const storedTime = sessionStorage.getItem("pending_paste_time")
+      if (storedTime && Date.now() - parseInt(storedTime, 10) < 300000) {
+        return sessionStorage.getItem("pending_paste") === "true"
+      }
+      sessionStorage.removeItem("pending_paste")
+      sessionStorage.removeItem("pending_paste_time")
+      return false
     } catch {
       return false
     }
@@ -65,8 +71,17 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   useEffect(() => {
     try {
       const searchParams = new URLSearchParams(window.location.search)
-      if (searchParams.get("source") === "shortcut" || sessionStorage.getItem("pending_paste") === "true") {
+      if (searchParams.get("source") === "shortcut") {
         setIsPendingPaste(true)
+      } else {
+        const storedTime = sessionStorage.getItem("pending_paste_time")
+        if (storedTime && Date.now() - parseInt(storedTime, 10) < 300000 && sessionStorage.getItem("pending_paste") === "true") {
+          setIsPendingPaste(true)
+        } else {
+          sessionStorage.removeItem("pending_paste")
+          sessionStorage.removeItem("pending_paste_time")
+          setIsPendingPaste(false)
+        }
       }
     } catch {}
   }, [])
@@ -74,6 +89,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const handleLaunchShortcut = () => {
     try {
       sessionStorage.setItem("pending_paste", "true")
+      sessionStorage.setItem("pending_paste_time", Date.now().toString())
       setIsPendingPaste(true)
       const currentOrigin = window.location.origin
       const currentPath = window.location.pathname
@@ -189,7 +205,8 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   const sanitizeBase64String = (str: string): string => {
     let cleaned = str.trim()
-    cleaned = cleaned.replace(/^['"]|['"]$/g, "")
+    cleaned = cleaned.replace(/^['"]+|['"]+$/g, "")
+    cleaned = cleaned.replace(/^,+|,+$/g, "")
     cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, "")
 
     let mime = "image/jpeg"
@@ -237,20 +254,32 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       while (searchIdx < trimmed.length) {
         const found = trimmed.indexOf("data:image", searchIdx)
         if (found === -1) break
-        let endIdx = trimmed.indexOf('"', found)
-        const singleQuoteEnd = trimmed.indexOf("'", found)
-        const newlineEnd = trimmed.indexOf("\n", found)
+
+        const nextData = trimmed.indexOf("data:image", found + 10)
+        const quoteIdx = trimmed.indexOf('"', found)
+        const singleQuoteIdx = trimmed.indexOf("'", found)
 
         let candidateEnd = trimmed.length
-        if (endIdx !== -1 && endIdx < candidateEnd) candidateEnd = endIdx
-        if (singleQuoteEnd !== -1 && singleQuoteEnd < candidateEnd) candidateEnd = singleQuoteEnd
-        if (newlineEnd !== -1 && newlineEnd < candidateEnd) candidateEnd = newlineEnd
 
-        const segment = trimmed.substring(found, candidateEnd)
+        if (quoteIdx !== -1 && (nextData === -1 || quoteIdx < nextData)) {
+          candidateEnd = quoteIdx
+        } else if (singleQuoteIdx !== -1 && (nextData === -1 || singleQuoteIdx < nextData)) {
+          candidateEnd = singleQuoteIdx
+        } else if (nextData !== -1) {
+          candidateEnd = nextData
+        } else {
+          const bracket = trimmed.lastIndexOf("]")
+          if (bracket > found) {
+            candidateEnd = bracket
+          }
+        }
+
+        const segment = trimmed.substring(found, candidateEnd).trim()
         if (segment.length > 50) {
           rawCandidates.push(segment)
         }
-        searchIdx = candidateEnd + 1
+
+        searchIdx = nextData !== -1 ? nextData : (candidateEnd + 1)
       }
     }
 
@@ -272,6 +301,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     if (dataUrls.length > 0) {
       try {
         sessionStorage.removeItem("pending_paste")
+        sessionStorage.removeItem("pending_paste_time")
         setIsPendingPaste(false)
       } catch {}
       const selected = dataUrls.slice(0, 20)
@@ -569,29 +599,44 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               </button>
 
               {isPendingPaste ? (
-                <div
-                  contentEditable
-                  suppressContentEditableWarning
-                  onPaste={handleNativePaste}
-                  onClick={handlePasteFromClipboard}
-                  className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer outline-none shadow-lg shadow-blue-500/20 animate-pulse"
-                >
-                  <div className="flex items-center gap-3 pointer-events-none">
-                    <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                      <Clipboard size={24} />
-                    </div>
-                    <div>
-                      <div className="font-extrabold text-white text-base">
-                        Paste 20 Photos
+                <div className="space-y-2">
+                  <div
+                    contentEditable
+                    suppressContentEditableWarning
+                    onPaste={handleNativePaste}
+                    onClick={handlePasteFromClipboard}
+                    className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer outline-none shadow-lg shadow-blue-500/20 animate-pulse"
+                  >
+                    <div className="flex items-center gap-3 pointer-events-none">
+                      <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                        <Clipboard size={24} />
                       </div>
-                      <div className="text-xs text-blue-200/90 font-normal mt-0.5">
-                        Tap here to paste from Shortcut
+                      <div>
+                        <div className="font-extrabold text-white text-base">
+                          Paste 20 Photos
+                        </div>
+                        <div className="text-xs text-blue-200/90 font-normal mt-0.5">
+                          Tap here to paste from Shortcut
+                        </div>
                       </div>
                     </div>
+                    <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0 pointer-events-none">
+                      Paste Now
+                    </span>
                   </div>
-                  <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0 pointer-events-none">
-                    Paste Now
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        sessionStorage.removeItem("pending_paste")
+                        sessionStorage.removeItem("pending_paste_time")
+                      } catch {}
+                      setIsPendingPaste(false)
+                    }}
+                    className="w-full text-center text-xs text-blue-300 hover:text-white transition-colors py-1"
+                  >
+                    Re-run Shortcut
+                  </button>
                 </div>
               ) : (
                 <>
