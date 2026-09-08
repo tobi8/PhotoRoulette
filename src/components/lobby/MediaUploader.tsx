@@ -643,105 +643,63 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             <div className="space-y-2.5">
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left"
+                onClick={handleLaunchShortcut}
+                className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer shadow-lg shadow-blue-500/20"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                    <ImageIcon size={24} />
+                    <Sparkles size={24} />
                   </div>
                   <div>
                     <div className="font-extrabold text-white text-base">
-                      Select Photos from Device
+                      Get 20 Photos from Shortcut
                     </div>
-                    <div className="text-xs text-emerald-200/90 font-normal mt-0.5">
-                      Choose from Photo Library
+                    <div className="text-xs text-blue-200/90 font-normal mt-0.5">
+                      Picks random photos via iOS Shortcut
                     </div>
                   </div>
                 </div>
                 <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
-                  Select
+                  Get 20
                 </span>
               </button>
 
-              {isPendingPaste ? (
-                <div className="space-y-2">
-                  <div
-                    contentEditable
-                    suppressContentEditableWarning
-                    onPaste={handleNativePaste}
-                    onClick={handlePasteFromClipboard}
-                    className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer outline-none shadow-lg shadow-blue-500/20 animate-pulse"
-                  >
-                    <div className="flex items-center gap-3 pointer-events-none">
-                      <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                        <Clipboard size={24} />
-                      </div>
-                      <div>
-                        <div className="font-extrabold text-white text-base">
-                          Paste 20 Photos
-                        </div>
-                        <div className="text-xs text-blue-200/90 font-normal mt-0.5">
-                          Tap here to paste from Shortcut
-                        </div>
-                      </div>
-                    </div>
-                    <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0 pointer-events-none">
-                      Paste Now
-                    </span>
+              <div
+                contentEditable
+                suppressContentEditableWarning
+                onPaste={handleNativePaste}
+                onClick={handlePasteFromClipboard}
+                className="w-full p-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 hover:from-indigo-500 hover:to-purple-500 border border-indigo-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer outline-none shadow-lg shadow-indigo-500/20"
+              >
+                <div className="flex items-center gap-3 pointer-events-none">
+                  <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                    <Clipboard size={24} />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      try {
-                        sessionStorage.removeItem("pending_paste")
-                        sessionStorage.removeItem("pending_paste_time")
-                      } catch {}
-                      setIsPendingPaste(false)
-                    }}
-                    className="w-full text-center text-xs text-blue-300 hover:text-white transition-colors py-1"
-                  >
-                    Re-run Shortcut
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleLaunchShortcut}
-                    className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                        <Sparkles size={24} />
-                      </div>
-                      <div>
-                        <div className="font-extrabold text-white text-base">
-                          Get 20 Photos from Shortcut
-                        </div>
-                        <div className="text-xs text-blue-200/90 font-normal mt-0.5">
-                          Picks random photos via iOS Shortcut
-                        </div>
-                      </div>
+                  <div>
+                    <div className="font-extrabold text-white text-base">
+                      Paste 20 Photos
                     </div>
-                    <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
-                      Get 20
-                    </span>
-                  </button>
+                    <div className="text-xs text-indigo-200/90 font-normal mt-0.5">
+                      Tap here to paste from Shortcut
+                    </div>
+                  </div>
+                </div>
+                <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0 pointer-events-none">
+                  Paste Now
+                </span>
+              </div>
 
-                  <a
-                    href={SHORTCUT_INSTALL_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full p-3.5 rounded-2xl bg-violet-950/50 hover:bg-violet-900/60 border border-violet-500/30 text-violet-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98"
-                  >
-                    <span className="text-sm font-bold text-white">Install Shortcut (First Time Only)</span>
-                    <span className="text-xs bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
-                      Install <ExternalLink size={12} />
-                    </span>
-                  </a>
-                </>
-              )}
+              <a
+                href={SHORTCUT_INSTALL_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full p-3.5 rounded-2xl bg-violet-950/50 hover:bg-violet-900/60 border border-violet-500/30 text-violet-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98"
+              >
+                <span className="text-sm font-bold text-white">Install Shortcut (First Time Only)</span>
+                <span className="text-xs bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
+                  Install <ExternalLink size={12} />
+                </span>
+              </a>
             </div>
           )}
         </div>
@@ -823,49 +781,71 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </Button>
 
             {isAndroidDevice ? (
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  fullWidth
-                  onClick={handleAndroidReroll}
-                  disabled={isPreparing}
-                  className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-950/30 text-xs py-2"
-                >
-                  <RefreshCw size={14} /> Reroll
-                </Button>
+              <div className="space-y-2">
                 <Button
                   variant="outline"
                   size="sm"
                   fullWidth
                   onClick={() => guaranteedInputRef.current?.click()}
-                  className="border-amber-500/40 text-amber-300 hover:bg-amber-950/30 text-xs py-2 font-bold"
+                  className="border-amber-500/40 text-amber-300 hover:bg-amber-950/30 text-xs py-2.5 font-bold"
                 >
                   <Star size={14} className={hasGuaranteed ? "fill-amber-400 text-amber-400" : ""} />
-                  <span className="truncate">{hasGuaranteed ? "Change Guaranteed" : "1 Guaranteed Photo"}</span>
+                  <span className="truncate">{hasGuaranteed ? "Change Guaranteed Photo" : "1 Guaranteed Photo"}</span>
                 </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    fullWidth
+                    onClick={handleAndroidReroll}
+                    disabled={isPreparing}
+                    className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-950/30 text-xs py-2"
+                  >
+                    <RefreshCw size={14} /> Reroll
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    fullWidth
+                    onClick={handleAndroidPick}
+                    disabled={isPreparing}
+                    className="border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs py-2"
+                  >
+                    <Smartphone size={14} /> Pick New
+                  </Button>
+                </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-2">
                 <Button
                   variant="outline"
                   size="sm"
                   fullWidth
                   onClick={() => guaranteedInputRef.current?.click()}
-                  className="border-amber-500/40 text-amber-300 hover:bg-amber-950/30 text-xs py-2 font-bold"
+                  className="border-amber-500/40 text-amber-300 hover:bg-amber-950/30 text-xs py-2.5 font-bold"
                 >
                   <Star size={14} className={hasGuaranteed ? "fill-amber-400 text-amber-400" : ""} />
-                  <span className="truncate">{hasGuaranteed ? "Change Guaranteed" : "1 Guaranteed Photo"}</span>
+                  <span className="truncate">{hasGuaranteed ? "Change Guaranteed Photo" : "1 Guaranteed Photo"}</span>
                 </Button>
-                <div
-                  contentEditable
-                  suppressContentEditableWarning
-                  onPaste={handleNativePaste}
-                  onClick={handlePasteFromClipboard}
-                  className="w-full p-2.5 rounded-xl border border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs flex items-center justify-center gap-2 cursor-pointer font-bold outline-none"
-                >
-                  <Clipboard size={14} className="pointer-events-none" />
-                  <span className="pointer-events-none">Paste New</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleLaunchShortcut}
+                    className="w-full p-2.5 rounded-xl border border-indigo-500/30 text-indigo-300 hover:bg-indigo-950/30 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold transition-all"
+                  >
+                    <Sparkles size={14} />
+                    <span>Get 20 Shortcut</span>
+                  </button>
+                  <div
+                    contentEditable
+                    suppressContentEditableWarning
+                    onPaste={handleNativePaste}
+                    onClick={handlePasteFromClipboard}
+                    className="w-full p-2.5 rounded-xl border border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold outline-none transition-all"
+                  >
+                    <Clipboard size={14} className="pointer-events-none" />
+                    <span className="pointer-events-none">Paste Photos</span>
+                  </div>
                 </div>
               </div>
             )}
