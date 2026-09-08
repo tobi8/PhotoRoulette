@@ -58,10 +58,9 @@ export async function analyzeImageHeuristics(
 
       let monochromeCount = 0
       let totalSaturation = 0
-      let brightBgCount = 0
-      let darkTextCount = 0
-
-      // Grayscale luminance buffer
+      let paperBgCount = 0
+      let textInkCount = 0
+      let nonPaperDarkCount = 0
       const gray = new Uint8Array(totalPixels)
 
       for (let i = 0; i < totalPixels; i++) {
@@ -70,34 +69,37 @@ export async function analyzeImageHeuristics(
         const g = data[idx + 1]
         const b = data[idx + 2]
 
-        // Luminance
         const lum = Math.round(0.299 * r + 0.587 * g + 0.114 * b)
         gray[i] = lum
 
-        // Saturation calculation
         const max = Math.max(r, g, b)
         const min = Math.min(r, g, b)
         const sat = max === 0 ? 0 : (max - min) / max
         totalSaturation += sat
 
-        // Low saturation = black/white/gray
-        if (sat < 0.18) {
+        if (sat < 0.25) {
           monochromeCount++
         }
 
-        // White paper background vs dark ink
-        if (lum > 210) brightBgCount++
-        if (lum < 60) darkTextCount++
+        if (lum > 175 && sat < 0.22) {
+          paperBgCount++
+        }
+
+        if (lum < 110 && sat < 0.35) {
+          textInkCount++
+        } else if (lum < 110) {
+          nonPaperDarkCount++
+        }
       }
 
       const monochromeRatio = monochromeCount / totalPixels
       const saturationMean = totalSaturation / totalPixels
-      const brightBgRatio = brightBgCount / totalPixels
-      const darkTextRatio = darkTextCount / totalPixels
+      const paperBgRatio = paperBgCount / totalPixels
+      const textInkRatio = textInkCount / totalPixels
 
-      // Edge detection (Horizontal Sobel gradient to detect text lines)
       let edgeCount = 0
       let horizontalTransitions = 0
+      let highDensityLineCount = 0
 
       for (let y = 1; y < height - 1; y++) {
         let rowTransitions = 0
@@ -110,47 +112,52 @@ export async function analyzeImageHeuristics(
           const diffH = Math.abs(current - right)
           const diffV = Math.abs(current - bottom)
 
-          if (diffH > 35 || diffV > 35) {
+          if (diffH > 25 || diffV > 25) {
             edgeCount++
           }
 
-          // Count sharp transitions indicative of typed characters
-          if (diffH > 50) {
+          if (diffH > 35) {
             rowTransitions++
           }
         }
-        if (rowTransitions > 12) {
+        if (rowTransitions >= 6) {
           horizontalTransitions++
+        }
+        if (rowTransitions >= 16) {
+          highDensityLineCount++
         }
       }
 
       const edgeDensity = edgeCount / ((width - 2) * (height - 2))
       const textLineScore = horizontalTransitions / height
-
-      // Heuristic Scoring Rules:
-      // STRICTLY AND ONLY flag genuine lame documents (receipts, bills, tax forms, invoices, paper scans).
-      // NEVER flag real-life photos (people, scenery, food, pets, black-and-white portraits, snowy landscapes).
+      const textLineDensity = highDensityLineCount / height
 
       let isDocument = false
       let confidence = 0
       let reason = ''
 
-      const isLongReceipt = (height / width > 1.8) && monochromeRatio > 0.70 && brightBgRatio > 0.45 && textLineScore > 0.30
+      const isLongReceipt = (height / width > 1.6 || width / height > 1.6) && paperBgRatio > 0.35 && (textLineScore > 0.15 || edgeDensity > 0.08)
 
       if (isLongReceipt) {
         isDocument = true
-        confidence = 0.96
-        reason = 'Cash register receipt or ticket detected'
-      } else if (monochromeRatio > 0.80 && brightBgRatio > 0.50 && darkTextRatio >= 0.02 && darkTextRatio <= 0.25 && textLineScore > 0.40) {
-        // High monochrome + wide paper-white background + sparse dark text in horizontal lines = printed paper receipt / invoice / bill
-        isDocument = true
         confidence = 0.95
-        reason = 'Printed document or receipt detected (paper background with text lines)'
-      } else if (edgeDensity > 0.22 && monochromeRatio > 0.82 && textLineScore > 0.45 && brightBgRatio > 0.45) {
-        // Structured black & white document like a table, invoice, or tax form
+        reason = 'Receipt, slip, or ticket format detected'
+      } else if (paperBgRatio > 0.38 && (textLineScore > 0.20 || edgeDensity > 0.08) && saturationMean < 0.25) {
+        isDocument = true
+        confidence = 0.94
+        reason = 'White paper document or page scan detected'
+      } else if (paperBgRatio > 0.50 && textInkRatio > 0.005) {
         isDocument = true
         confidence = 0.92
-        reason = 'Spreadsheet or tax/billing form detected'
+        reason = 'Document page or printed sheet detected'
+      } else if (monochromeRatio > 0.70 && paperBgRatio > 0.30 && (textLineDensity > 0.08 || edgeDensity > 0.12)) {
+        isDocument = true
+        confidence = 0.90
+        reason = 'Text page, form, or document scan detected'
+      } else if (monochromeRatio > 0.75 && edgeDensity > 0.15 && saturationMean < 0.18) {
+        isDocument = true
+        confidence = 0.88
+        reason = 'Document, invoice, or screenshot detected'
       }
 
       resolve({
