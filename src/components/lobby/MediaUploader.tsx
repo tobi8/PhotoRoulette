@@ -189,7 +189,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   const sanitizeBase64String = (str: string): string => {
     let cleaned = str.trim()
-    cleaned = cleaned.replace(/^['"]+|['"]+$/g, "")
+    cleaned = cleaned.replace(/^['"]|['"]$/g, "")
     cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, "")
 
     let mime = "image/jpeg"
@@ -237,18 +237,16 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       while (searchIdx < trimmed.length) {
         const found = trimmed.indexOf("data:image", searchIdx)
         if (found === -1) break
-        const nextData = trimmed.indexOf("data:image", found + 10)
         let endIdx = trimmed.indexOf('"', found)
         const singleQuoteEnd = trimmed.indexOf("'", found)
         const newlineEnd = trimmed.indexOf("\n", found)
 
-        let candidateEnd = nextData !== -1 ? nextData : trimmed.length
+        let candidateEnd = trimmed.length
         if (endIdx !== -1 && endIdx < candidateEnd) candidateEnd = endIdx
         if (singleQuoteEnd !== -1 && singleQuoteEnd < candidateEnd) candidateEnd = singleQuoteEnd
         if (newlineEnd !== -1 && newlineEnd < candidateEnd) candidateEnd = newlineEnd
 
-        let segment = trimmed.substring(found, candidateEnd).trim()
-        if (segment.endsWith(",")) segment = segment.slice(0, -1).trim()
+        const segment = trimmed.substring(found, candidateEnd)
         if (segment.length > 50) {
           rawCandidates.push(segment)
         }
@@ -257,11 +255,11 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
 
     if (rawCandidates.length === 0) {
-      const parts = trimmed.includes("\n") ? trimmed.split(/[\r\n]+/) : trimmed.split(",")
-      for (const part of parts) {
-        const trimmedPart = part.trim()
-        if (trimmedPart.length > 50) {
-          rawCandidates.push(trimmedPart)
+      const lines = trimmed.split(/[\r\n]+/)
+      for (const line of lines) {
+        const trimmedLine = line.trim()
+        if (trimmedLine.length > 50) {
+          rawCandidates.push(trimmedLine)
         }
       }
     }
