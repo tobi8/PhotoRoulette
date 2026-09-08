@@ -312,7 +312,7 @@ public class NativeGalleryPlugin extends Plugin {
                             results.put(item);
                         }
                     } else {
-                        byte[] imgBytes = compressImage(ref.uri, 1280, 75);
+                        byte[] imgBytes = compressImage(ref.uri, 800, 65);
                         if (imgBytes != null && imgBytes.length > 0) {
                             String base64 = Base64.encodeToString(imgBytes, Base64.NO_WRAP);
                             item.put("data", "data:image/jpeg;base64," + base64);

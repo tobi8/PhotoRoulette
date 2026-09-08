@@ -153,19 +153,23 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   }
 
   const autoExcludeBoringDocuments = async (mediaList: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }>) => {
-    const docIds: string[] = []
-    for (const item of mediaList) {
-      try {
-        const res = await analyzeImageHeuristics(item.dataUrl)
-        if (res.isDocument) {
-          docIds.push(item.id)
-        }
-      } catch {}
-    }
-    if (docIds.length > 0) {
-      excludeDocuments(docIds)
-      setStatusMessage(`AI auto-excluded ${docIds.length} boring document${docIds.length > 1 ? 's' : ''}!`)
-    }
+    try {
+      const results = await Promise.all(
+        mediaList.map(async (item) => {
+          try {
+            const res = await analyzeImageHeuristics(item.dataUrl)
+            return res.isDocument ? item.id : null
+          } catch {
+            return null
+          }
+        })
+      )
+      const docIds = results.filter((id): id is string => id !== null)
+      if (docIds.length > 0) {
+        excludeDocuments(docIds)
+        setStatusMessage(`AI auto-excluded ${docIds.length} boring document${docIds.length > 1 ? 's' : ''}!`)
+      }
+    } catch {}
   }
 
   const processAndLoadFiles = async (fileList: File[]) => {
