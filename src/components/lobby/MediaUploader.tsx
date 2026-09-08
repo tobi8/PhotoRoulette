@@ -52,7 +52,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const [vaultCount, setVaultCount] = useState<number>(0)
   const [isSecretMode, setIsSecretMode] = useState<boolean>(false)
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
-  const [isTurboMode, setIsTurboMode] = useState<boolean>(true)
+  const [isPreparing, setIsPreparing] = useState<boolean>(false)
 
   const {
     isScanning,
@@ -145,11 +145,20 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       // Reset input value so user can select again without needing to reload
       e.target.value = ''
 
+      // Show loading indicator immediately while preparing files
+      setIsPreparing(true)
+
       // Randomly shuffle all incoming files first using Fisher-Yates
       filesArray = fisherYatesShuffle(filesArray)
 
+      // Small delay to let the UI render the loading indicator
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
       // Process and filter files (downscaling + document heuristics + safety filter)
-      const { accepted } = await processFiles(filesArray, { turbo: isTurboMode })
+      // Always use turbo mode for fastest possible processing
+      const { accepted } = await processFiles(filesArray, { turbo: true })
+
+      setIsPreparing(false)
 
       if (accepted.length > 0) {
         // Automatically save all clean accepted media into device's persistent IndexedDB vault
@@ -338,48 +347,48 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setIsTurboMode(!isTurboMode)}
-            className={`px-2.5 py-1 rounded-full text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${
-              isTurboMode
-                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
-                : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
-            }`}
-            title={isTurboMode ? 'Turbo Fast mode active: Lower quality for ultra-fast loading' : 'Standard quality active'}
-          >
-            <span>{isTurboMode ? '⚡ Turbo Fast (Low Res)' : '🖼️ Standard Res'}</span>
-          </button>
-
-          {vaultCount > 0 && (
-            <Badge variant="success" size="md">
-              {mediaType === 'videos_only'
-                ? `🎥 ${vaultCount} Videos`
-                : mediaType === 'photos_only'
-                ? `💾 ${vaultCount} Photos`
-                : `✨ ${vaultCount} Items`}{' '}
-              in Vault
-            </Badge>
-          )}
-        </div>
+        {vaultCount > 0 && (
+          <Badge variant="success" size="md">
+            {mediaType === 'videos_only'
+              ? `🎥 ${vaultCount} Videos`
+              : mediaType === 'photos_only'
+              ? `💾 ${vaultCount} Photos`
+              : `✨ ${vaultCount} Items`}{' '}
+            in Vault
+          </Badge>
+        )}
       </div>
 
-      {/* Hidden native input with iOS native hardware conversion support */}
+      {/* Hidden native input */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
         accept={
           mediaType === 'videos_only'
-            ? 'video/mp4,video/quicktime,video/webm,video/*'
+            ? 'video/*,.mp4,.mov,.m4v,.webm,.avi,.mkv'
             : mediaType === 'photos_only'
-            ? 'image/jpeg,image/png,image/webp,image/*'
-            : 'image/jpeg,image/png,image/webp,image/*,video/mp4,video/quicktime,video/*'
+            ? 'image/*,.heic,.heif'
+            : 'image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm'
         }
         className="hidden"
         onChange={handleFileChange}
       />
+
+      {/* Preparing files indicator (shown immediately after file picker closes, before scan starts) */}
+      {isPreparing && !isScanning && (
+        <div className="w-full bg-[#1e1b38] border border-violet-500/30 rounded-2xl p-4 shadow-xl animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center">
+              <RotateCw size={18} className="text-violet-400 animate-spin" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-white">Preparing your photos...</div>
+              <div className="text-xs text-gray-400">Loading selected files, this may take a moment</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Temporary vault notification */}
       {vaultMessage && (

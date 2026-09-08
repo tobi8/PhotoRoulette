@@ -38,7 +38,7 @@ export function useDocumentFilter() {
   const [items, setItems] = useState<FilterResultItem[]>([])
 
   /**
-   * Process uploaded files with automatic AI document analysis
+   * Process uploaded files with automatic AI document analysis (always ultra-fast turbo mode)
    */
   const processFiles = useCallback(async (
     files: File[],
@@ -47,26 +47,21 @@ export function useDocumentFilter() {
     accepted: MediaItem[]
     excluded: ExcludedMediaItem[]
   }> => {
-    const isTurbo = options?.turbo ?? true
     setIsScanning(true)
-    setProgress({ current: 0, total: files.length, status: isTurbo ? '⚡ Initializing Turbo fast scan...' : 'Preparing scanner...' })
+    setProgress({ current: 0, total: files.length, status: '⚡ Initializing fast scan...' })
 
     const results: Array<ExcludedMediaItem & { dataUrl: string; type: 'image' | 'video' }> = []
 
-    // In turbo mode, process 4 files concurrently with ultra-light compression
-    const BATCH_SIZE = isTurbo ? 4 : 2
-    const compressionOpts = isTurbo
-      ? { maxDim: 480, quality: 0.45 }
-      : { maxDim: 800, quality: 0.65 }
+    // Always use turbo: process 4 files concurrently with ultra-light compression
+    const BATCH_SIZE = 4
+    const compressionOpts = { maxDim: 480, quality: 0.45 }
 
     for (let i = 0; i < files.length; i += BATCH_SIZE) {
       const batch = files.slice(i, i + BATCH_SIZE)
       setProgress({
         current: Math.min(i + batch.length, files.length),
         total: files.length,
-        status: isTurbo
-          ? `⚡ Turbo processing (${Math.min(i + batch.length, files.length)} of ${files.length})...`
-          : `Analyzing photos (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
+        status: `⚡ Processing (${Math.min(i + batch.length, files.length)} of ${files.length})...`,
       })
 
       const batchResults = await Promise.all(
