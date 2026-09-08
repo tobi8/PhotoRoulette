@@ -1354,9 +1354,9 @@ export default function App() {
                       fullWidth
                       disabled={players.length < 1}
                       onClick={startFullGame}
-                      className="text-base font-black shadow-violet-900/50"
+                      className="text-base font-black shadow-violet-900/50 tracking-wider"
                     >
-                      <span>Start Photo Roulette! (Fully Automated ⚡)</span>
+                      <span>START</span>
                     </Button>
                     <p className="text-[11px] text-gray-400 text-center">
                       Rounds, owner reveals and scoreboards will automatically transition every 3 seconds hands-free!

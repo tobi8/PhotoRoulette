@@ -11,7 +11,6 @@ import {
   Star,
   ExternalLink,
   RefreshCw,
-  Image as ImageIcon,
 } from "lucide-react"
 import { Button } from "../ui/Button"
 import { Badge } from "../ui/Badge"
@@ -48,11 +47,9 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   roomId,
   userId,
 }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const guaranteedInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [isPreparing, setIsPreparing] = useState(false)
-  const [isScanningDocs, setIsScanningDocs] = useState(false)
   const [permissionDenied, setPermissionDenied] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [isPendingPaste, setIsPendingPaste] = useState<boolean>(() => {
@@ -154,31 +151,19 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
-  const handleExcludeDocuments = async () => {
-    if (items.length === 0 || isScanningDocs) return
-    setIsScanningDocs(true)
-    setStatusMessage("Scanning photos with AI...")
-    try {
-      const docIds: string[] = []
-      for (const item of items) {
-        if (item.isGuaranteed) continue
+  const autoExcludeBoringDocuments = async (mediaList: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }>) => {
+    const docIds: string[] = []
+    for (const item of mediaList) {
+      try {
         const res = await analyzeImageHeuristics(item.dataUrl)
         if (res.isDocument) {
           docIds.push(item.id)
         }
-      }
-      if (docIds.length > 0) {
-        excludeDocuments(docIds)
-        setStatusMessage(`AI excluded ${docIds.length} boring document${docIds.length > 1 ? "s" : ""}!`)
-      } else {
-        setStatusMessage("AI scan complete: No boring documents detected!")
-      }
-    } catch (err) {
-      console.error(err)
-      setStatusMessage("Failed to scan documents.")
-    } finally {
-      setIsScanningDocs(false)
-      setTimeout(() => setStatusMessage(null), 4000)
+      } catch {}
+    }
+    if (docIds.length > 0) {
+      excludeDocuments(docIds)
+      setStatusMessage(`AI auto-excluded ${docIds.length} boring document${docIds.length > 1 ? 's' : ''}!`)
     }
   }
 
@@ -207,6 +192,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         onToggleReady()
       }
       setStatusMessage(`${processed.length} photos loaded!`)
+      await autoExcludeBoringDocuments(processed)
     } catch (err) {
       console.error(err)
       setStatusMessage("Failed to process photos.")
@@ -214,14 +200,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       setIsPreparing(false)
       setTimeout(() => setStatusMessage(null), 4000)
     }
-  }
-
-  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files || files.length === 0) return
-    const fileArray = Array.from(files)
-    e.target.value = ""
-    await processAndLoadFiles(fileArray)
   }
 
   const handleNativePaste = async (e: React.ClipboardEvent) => {
@@ -284,7 +262,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     return `data:${mime};base64,${cleaned}`
   }
 
-  const handlePastedText = (text: string) => {
+  const handlePastedText = async (text: string) => {
     const rawCandidates: string[] = []
     const trimmed = text.trim().replace(/^[\u200B-\u200D\uFEFF]+|[\u200B-\u200D\uFEFF]+$/g, "")
 
@@ -376,6 +354,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         onToggleReady()
       }
       setStatusMessage(`${mapped.length} photos ready!`)
+      await autoExcludeBoringDocuments(mapped)
     } else {
       setStatusMessage("Could not decode photos from clipboard.")
     }
@@ -435,6 +414,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           onToggleReady()
         }
         setStatusMessage(`${mapped.length} photos ready!`)
+        await autoExcludeBoringDocuments(mapped)
       } else {
         setStatusMessage("Tap button and select 'Paste' (Einsetzen) from popup.")
       }
@@ -474,6 +454,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             onToggleReady()
           }
           setStatusMessage("20 items picked!")
+          await autoExcludeBoringDocuments(mapped)
           setIsPreparing(false)
           return
         }
@@ -505,6 +486,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           loadExistingMedia(mapped)
           onMediaReady(mapped)
           setStatusMessage("Rerolled 20 items!")
+          await autoExcludeBoringDocuments(mapped)
           setIsPreparing(false)
           return
         }
@@ -547,14 +529,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   return (
     <div className="w-full bg-[#171527] border border-white/10 rounded-3xl p-5 shadow-xl space-y-4">
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept="image/*,.heic,.heif"
-        className="hidden"
-        onChange={handleFileInputChange}
-      />
       <input
         ref={guaranteedInputRef}
         type="file"
@@ -709,24 +683,13 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             <span className="text-violet-300 font-black">
               Selected Items ({approvedItems.length})
             </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleExcludeDocuments}
-                disabled={isScanningDocs || items.length === 0}
-                className="text-xs bg-violet-950/60 hover:bg-violet-900/60 text-violet-300 hover:text-white px-2.5 py-1 rounded-lg flex items-center gap-1 font-bold border border-violet-500/30 transition-all disabled:opacity-50 cursor-pointer"
-              >
-                <Sparkles size={13} className={isScanningDocs ? "animate-spin text-amber-400" : "text-violet-400"} />
-                <span>{isScanningDocs ? "Scanning..." : "Exclude Documents with AI"}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsPreviewModalOpen(true)}
-                className="text-xs text-violet-400 hover:text-white flex items-center gap-1 font-bold cursor-pointer"
-              >
-                <Eye size={14} /> Review
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsPreviewModalOpen(true)}
+              className="text-xs text-violet-400 hover:text-white flex items-center gap-1 font-bold cursor-pointer"
+            >
+              <Eye size={14} /> Review
+            </button>
           </div>
 
           <div className="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto p-1.5 bg-black/30 rounded-2xl border border-white/5">
