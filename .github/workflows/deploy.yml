@@ -52,8 +52,7 @@ jobs:
           cd android
           ./gradlew assembleDebug --stacktrace --no-daemon > ../build.log 2>&1 || {
             git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            tail -n 80 ../build.log > ../build-error.txt
+            grep -A 30 -i "what went wrong" ../build.log > ../build-error.txt || tail -n 200 ../build.log > ../build-error.txt
             cd ..
             git add build-error.txt
             git commit -m "diagnostics: build error log"
