@@ -68,7 +68,7 @@ export function useDocumentFilter() {
 
             // 2. Run instant Canvas Heuristic AI analysis
             const heuristic = await analyzeImageHeuristics(compressed.thumbnailUrl, file.name)
-            const isFlagged = heuristic.isDocument && heuristic.confidence >= 0.90
+            const isFlagged = compressed.type !== 'video' && heuristic.isDocument && heuristic.confidence >= 0.90
             const reason = isFlagged ? heuristic.reason : 'Verified safe photo'
 
             return {
@@ -136,7 +136,7 @@ export function useDocumentFilter() {
 
       try {
         const heuristic = await analyzeImageHeuristics(item.previewUrl || item.dataUrl, item.file?.name)
-        const isDoc = heuristic.isDocument && heuristic.confidence >= 0.90
+        const isDoc = item.type !== 'video' && heuristic.isDocument && heuristic.confidence >= 0.90
         if (isDoc) foundDocuments++
         updatedItems.push({
           ...item,

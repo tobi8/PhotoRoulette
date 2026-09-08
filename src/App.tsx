@@ -21,6 +21,8 @@ import {
   AVATAR_COLORS,
   AVATAR_EMOJIS,
   getMockPartyPhotos,
+  getMockPartyVideos,
+  getMockPartyDeck,
   MOCK_BOT_PLAYERS,
 } from './utils/mockData'
 
@@ -455,13 +457,19 @@ export default function App() {
     const botTemplate = MOCK_BOT_PLAYERS[players.length % MOCK_BOT_PLAYERS.length]
     const botId = `bot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 
-    // Generate mock photos for this bot
-    const mockPhotos = getMockPartyPhotos().slice(0, 4).map((p) => ({
+    // Generate mock media for this bot matching the selected mediaType
+    const botRawMedia = (
+      settings.mediaType === 'videos_only'
+        ? getMockPartyVideos().slice(0, 4)
+        : settings.mediaType === 'mixed'
+        ? getMockPartyDeck('mixed').slice(0, 4)
+        : getMockPartyPhotos().slice(0, 4)
+    ).map((p) => ({
       ...p,
       ownerId: botId,
       ownerName: botTemplate.name,
     }))
-    mediaDeckRef.current = [...mediaDeckRef.current, ...mockPhotos]
+    mediaDeckRef.current = [...mediaDeckRef.current, ...botRawMedia]
 
     const newBot: Player = {
       ...botTemplate,
@@ -472,7 +480,7 @@ export default function App() {
       streak: 0,
       lastRoundPoints: 0,
       fastestAnswersCount: 0,
-      mediaCount: mockPhotos.length,
+      mediaCount: botRawMedia.length,
     }
 
     setPlayers((prev) => {
@@ -550,32 +558,56 @@ export default function App() {
   const startFullGame = () => {
     clearAutoTimer()
 
-    // If deck is empty or has few photos, top it up with mock party photos
-    if (mediaDeckRef.current.length === 0) {
-      const mockPhotos = getMockPartyPhotos().map((p, idx) => {
-        const owner = players[idx % players.length] || players[0]
-        return {
-          ...p,
-          ownerId: owner.id,
-          ownerName: owner.name,
-        }
-      })
-      mediaDeckRef.current = mockPhotos
-    }
+    let currentDeck = [...mediaDeckRef.current]
 
-    // Filter mediaDeck according to host's mediaType setting
-    let filteredDeck = mediaDeckRef.current
     if (settings.mediaType === 'photos_only') {
-      filteredDeck = filteredDeck.filter((m) => m.type === 'image')
+      currentDeck = currentDeck.filter((m) => m.type === 'image')
+      if (currentDeck.length === 0) {
+        currentDeck = getMockPartyPhotos().map((p, idx) => ({
+          ...p,
+          ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
+          ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
+        }))
+      }
     } else if (settings.mediaType === 'videos_only') {
-      filteredDeck = filteredDeck.filter((m) => m.type === 'video')
-    }
-    if (filteredDeck.length > 0) {
-      mediaDeckRef.current = filteredDeck
+      currentDeck = currentDeck.filter((m) => m.type === 'video')
+      // If no videos uploaded by players, automatically populate with mock party videos!
+      if (currentDeck.length === 0) {
+        currentDeck = getMockPartyVideos().map((v, idx) => ({
+          ...v,
+          ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
+          ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
+        }))
+      }
+    } else {
+      // 'mixed' mode: Ensure BOTH photos and videos are present!
+      const photos = currentDeck.filter((m) => m.type === 'image')
+      const videos = currentDeck.filter((m) => m.type === 'video')
+
+      const combined = [...currentDeck]
+      // If no videos uploaded, mix in mock party videos!
+      if (videos.length === 0) {
+        const mockVideos = getMockPartyVideos().map((v, idx) => ({
+          ...v,
+          ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
+          ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
+        }))
+        combined.push(...mockVideos)
+      }
+      // If no photos uploaded, mix in mock photos!
+      if (photos.length === 0) {
+        const mockPhotos = getMockPartyPhotos().map((p, idx) => ({
+          ...p,
+          ownerId: players[idx % players.length]?.id || players[0]?.id || 'host',
+          ownerName: players[idx % players.length]?.name || players[0]?.name || 'Player',
+        }))
+        combined.push(...mockPhotos)
+      }
+      currentDeck = combined
     }
 
     // Shuffle media deck
-    mediaDeckRef.current = [...mediaDeckRef.current].sort(() => Math.random() - 0.5)
+    mediaDeckRef.current = currentDeck.sort(() => Math.random() - 0.5)
 
     // Reset scores & streaks
     const resetPlayers = players.map((p) => ({

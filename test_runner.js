@@ -72,4 +72,26 @@ assert.strictEqual(awards.chameleon?.player.id, 'p2', 'Bob should be chameleon (
 assert.strictEqual(awards.eagleEye?.player.id, 'p1', 'Alice should have highest points')
 
 console.log('✅ Post-game awards logic passed')
+
+// 4. Test Media Decks (Videos Only, Photos Only, Mixed)
+import { getMockPartyVideos, getMockPartyPhotos, getMockPartyDeck } from './src/utils/mockData.ts'
+
+const mockVideos = getMockPartyVideos()
+assert.ok(mockVideos.length > 0, 'Mock videos should be available')
+assert.ok(mockVideos.every((v) => v.type === 'video'), 'All mock videos must have type === video')
+assert.ok(mockVideos.every((v) => v.dataUrl.startsWith('data:video/mp4;base64,')), 'All mock videos must be base64 mp4')
+
+const videosOnlyDeck = getMockPartyDeck('videos_only')
+assert.ok(videosOnlyDeck.length > 0, 'Videos-only deck should not be empty')
+assert.ok(videosOnlyDeck.every((m) => m.type === 'video'), 'All items in videos-only deck must have type === video')
+
+const photosOnlyDeck = getMockPartyDeck('photos_only')
+assert.ok(photosOnlyDeck.length > 0, 'Photos-only deck should not be empty')
+assert.ok(photosOnlyDeck.every((m) => m.type === 'image'), 'All items in photos-only deck must have type === image')
+
+const mixedDeck = getMockPartyDeck('mixed')
+assert.ok(mixedDeck.some((m) => m.type === 'video'), 'Mixed deck must contain videos')
+assert.ok(mixedDeck.some((m) => m.type === 'image'), 'Mixed deck must contain photos')
+console.log('✅ Video and mixed media deck modes passed')
+
 console.log('🎉 All automated tests passed successfully!')

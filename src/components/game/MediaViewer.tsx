@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ShieldAlert, AlertTriangle } from 'lucide-react'
+import { ShieldAlert, AlertTriangle, Volume2, VolumeX, Film } from 'lucide-react'
 
 interface MediaViewerProps {
   media: {
@@ -23,25 +23,47 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
   isHostTV = false,
 }) => {
   const [blurAmount, setBlurAmount] = useState(progressiveBlur ? 24 : 0)
+  const [isMuted, setIsMuted] = useState(true)
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  // Manage video playback: automatically pauses when time expires or vetoed!
+  // Manage video playback: automatically pauses when time expires, vetoed, or reaches 10s
   useEffect(() => {
     if (media.type === 'video' && videoRef.current) {
       if (isTimeUp || isVetoed) {
         videoRef.current.pause()
       } else {
         videoRef.current.currentTime = 0
+        videoRef.current.muted = isMuted
         videoRef.current.play().catch(() => {
-          // Fallback if browser requires muted autoplay
+          // Guaranteed fallback if browser requires muted autoplay
           if (videoRef.current) {
             videoRef.current.muted = true
+            setIsMuted(true)
             videoRef.current.play().catch(() => {})
           }
         })
       }
     }
-  }, [media.type, isTimeUp, isVetoed, media.id])
+  }, [media.type, isTimeUp, isVetoed, media.id, isMuted])
+
+  const handleTimeUpdate = () => {
+    // Strictly cap playback at 10 seconds max
+    if (videoRef.current && videoRef.current.currentTime >= 10) {
+      videoRef.current.pause()
+    }
+  }
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (videoRef.current) {
+      const nextMuted = !isMuted
+      videoRef.current.muted = nextMuted
+      setIsMuted(nextMuted)
+      if (!nextMuted) {
+        videoRef.current.play().catch(() => {})
+      }
+    }
+  }
 
   // Progressive blur animation
   useEffect(() => {
@@ -76,18 +98,42 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
       {/* Active Media */}
       {!isVetoed ? (
         media.type === 'video' ? (
-          <video
-            ref={videoRef}
-            src={media.dataUrl}
-            autoPlay
-            playsInline
-            muted={false}
-            className="w-full h-full object-contain"
-            style={{
-              filter: `blur(${blurAmount}px)`,
-              transition: 'filter 0.08s linear',
-            }}
-          />
+          <div className="relative w-full h-full flex items-center justify-center">
+            <video
+              ref={videoRef}
+              src={media.dataUrl}
+              autoPlay
+              playsInline
+              muted={isMuted}
+              onTimeUpdate={handleTimeUpdate}
+              className="w-full h-full object-contain"
+              style={{
+                filter: `blur(${blurAmount}px)`,
+                transition: 'filter 0.08s linear',
+              }}
+            />
+
+            {/* Video Badge */}
+            <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/15 text-white/90 text-xs font-semibold shadow-lg pointer-events-none z-10">
+              <Film size={12} className="text-violet-400" />
+              <span>Video (Max 10s)</span>
+            </div>
+
+            {/* Audio Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleMute}
+              className="absolute bottom-3 right-3 p-2 rounded-full bg-black/70 hover:bg-black/90 text-white backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform active:scale-90 z-10"
+              title={isMuted ? 'Unmute video audio' : 'Mute video audio'}
+              aria-label="Toggle video sound"
+            >
+              {isMuted ? (
+                <VolumeX size={18} className="text-red-400" />
+              ) : (
+                <Volume2 size={18} className="text-violet-400" />
+              )}
+            </button>
+          </div>
         ) : (
           <img
             src={media.dataUrl}

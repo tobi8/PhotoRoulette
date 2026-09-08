@@ -19,6 +19,9 @@ export const AVATAR_COLORS = [
 
 // Canvas helper to generate themed colorful mock party photos
 export function generateMockPhoto(label: string, bgColor: string, icon: string, isDocument = false): string {
+  if (typeof document === 'undefined') {
+    return `data:image/jpeg;base64,mock_${encodeURIComponent(label)}`
+  }
   const canvas = document.createElement('canvas')
   canvas.width = 800
   canvas.height = 600
@@ -89,6 +92,8 @@ export function generateMockPhoto(label: string, bgColor: string, icon: string, 
   return canvas.toDataURL('image/jpeg', 0.8)
 }
 
+import mockVideosData from './mockVideos.json'
+
 export function getMockPartyPhotos() {
   return [
     { id: 'mock-1', title: 'Summer Roadtrip 🚗', color: '#6366f1', emoji: '🏖️' },
@@ -104,6 +109,42 @@ export function getMockPartyPhotos() {
     type: 'image' as const,
     dataUrl: generateMockPhoto(item.title, item.color, item.emoji),
   }))
+}
+
+export function getMockPartyVideos() {
+  const clips = [
+    { id: 'mock-vid-1', title: 'Karaoke Night 🎤', key: 'karaoke', color: '#ec4899', emoji: '🎤' },
+    { id: 'mock-vid-2', title: 'Dance Floor Vibe 🪩', key: 'dance', color: '#8b5cf6', emoji: '🪩' },
+    { id: 'mock-vid-3', title: 'Champagne Pop 🍾', key: 'cheers', color: '#f59e0b', emoji: '🍾' },
+    { id: 'mock-vid-4', title: 'Rollercoaster Ride 🎢', key: 'rollercoaster', color: '#3b82f6', emoji: '🎢' },
+  ]
+  return clips.map((c) => ({
+    id: c.id,
+    type: 'video' as const,
+    dataUrl: (mockVideosData as Record<string, string>)[c.key] || '',
+    previewUrl: generateMockPhoto(c.title, c.color, c.emoji),
+  }))
+}
+
+export function getMockPartyDeck(mediaType: 'photos_only' | 'videos_only' | 'mixed' = 'mixed') {
+  const photos = getMockPartyPhotos()
+  const videos = getMockPartyVideos()
+
+  if (mediaType === 'photos_only') {
+    return photos
+  }
+  if (mediaType === 'videos_only') {
+    return videos
+  }
+
+  // Mixed: interleave photos and videos
+  const mixed: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; previewUrl?: string }> = []
+  const maxLen = Math.max(photos.length, videos.length)
+  for (let i = 0; i < maxLen; i++) {
+    if (i < photos.length) mixed.push(photos[i])
+    if (i < videos.length) mixed.push(videos[i])
+  }
+  return mixed
 }
 
 export const MOCK_BOT_PLAYERS: Array<Omit<Player, 'id' | 'isHost' | 'mediaCount' | 'score' | 'streak' | 'lastRoundPoints' | 'fastestAnswersCount'>> = [

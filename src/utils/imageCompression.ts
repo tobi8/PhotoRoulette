@@ -293,80 +293,60 @@ function createVideoFallbackPoster(label = 'Video Clip 🎥'): string {
  * Process a short video (< 5 seconds) or capture its poster frame.
  * Includes a strict 2-second timeout so it NEVER freezes on Android/Pixel!
  */
+/**
+ * Process video: Trims to the first 10 seconds and compresses it for seamless WebRTC play.
+ * Always maintains type: 'video'.
+ */
 export async function processVideo(file: File): Promise<CompressionResult> {
   return new Promise((resolve) => {
-    let isResolved = false
     const blobUrl = URL.createObjectURL(file)
-
-    const fallbackResolve = () => {
-      if (isResolved) return
-      isResolved = true
-      URL.revokeObjectURL(blobUrl)
-
-      const poster = createVideoFallbackPoster(file.name || 'Video Clip 🎥')
-
-      // Read as base64 or blob URL
-      if (file.size <= 3 * 1024 * 1024) {
-        const reader = new FileReader()
-        reader.onload = () => {
-          resolve({
-            dataUrl: reader.result as string,
-            thumbnailUrl: poster,
-            width: 640,
-            height: 480,
-            sizeBytes: file.size,
-            type: 'video',
-          })
-        }
-        reader.onerror = () => {
-          resolve({
-            dataUrl: poster,
-            thumbnailUrl: poster,
-            width: 640,
-            height: 480,
-            sizeBytes: poster.length,
-            type: 'image',
-          })
-        }
-        reader.readAsDataURL(file)
-      } else {
-        resolve({
-          dataUrl: poster,
-          thumbnailUrl: poster,
-          width: 640,
-          height: 480,
-          sizeBytes: poster.length,
-          type: 'image',
-        })
-      }
-    }
-
-    // 2-second timeout guard against mobile browser seek stalls
-    const timeout = setTimeout(fallbackResolve, 2000)
-
     const video = document.createElement('video')
     video.preload = 'metadata'
     video.muted = true
     video.playsInline = true
     video.src = blobUrl
 
-    video.onloadedmetadata = () => {
-      try {
-        const seekTime = Math.min(1.0, video.duration / 2) || 0.1
-        video.currentTime = seekTime
-      } catch {
-        clearTimeout(timeout)
-        fallbackResolve()
-      }
+    let isFinished = false
+
+    const finish = (res: CompressionResult) => {
+      if (isFinished) return
+      isFinished = true
+      URL.revokeObjectURL(blobUrl)
+      resolve(res)
     }
 
-    video.onseeked = () => {
-      if (isResolved) return
-      clearTimeout(timeout)
-      isResolved = true
+    // Safety timeout: ensure we never hang even if video metadata or seek stalls
+    const safetyTimeout = setTimeout(() => {
+      const poster = createVideoFallbackPoster(file.name || 'Video Clip 🎥')
+      const reader = new FileReader()
+      reader.onload = () => {
+        finish({
+          dataUrl: (reader.result as string) || poster,
+          thumbnailUrl: poster,
+          width: 640,
+          height: 480,
+          sizeBytes: file.size,
+          type: 'video',
+        })
+      }
+      reader.onerror = () => {
+        finish({
+          dataUrl: poster,
+          thumbnailUrl: poster,
+          width: 640,
+          height: 480,
+          sizeBytes: poster.length,
+          type: 'video',
+        })
+      }
+      reader.readAsDataURL(file.size > 5 * 1024 * 1024 ? file.slice(0, 5 * 1024 * 1024) : file)
+    }, 12000)
 
+    video.onloadedmetadata = async () => {
       try {
-        const maxDim = 800
+        const duration = video.duration || 10
+        const clipDuration = Math.min(10, duration)
+        const maxDim = 640
         let width = video.videoWidth || 640
         let height = video.videoHeight || 480
 
@@ -380,21 +360,28 @@ export async function processVideo(file: File): Promise<CompressionResult> {
           }
         }
 
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        if (ctx) {
-          ctx.drawImage(video, 0, 0, width, height)
+        // 1. Generate thumbnail poster from the first second
+        video.currentTime = Math.min(1.0, clipDuration / 2) || 0.1
+        await new Promise<void>((r) => {
+          video.onseeked = () => r()
+          setTimeout(r, 600)
+        })
+
+        const thumbCanvas = document.createElement('canvas')
+        thumbCanvas.width = width
+        thumbCanvas.height = height
+        const thumbCtx = thumbCanvas.getContext('2d')
+        if (thumbCtx) {
+          thumbCtx.drawImage(video, 0, 0, width, height)
         }
-        const posterDataUrl = canvas.toDataURL('image/jpeg', 0.7)
+        const posterDataUrl = thumbCanvas.toDataURL('image/jpeg', 0.7)
 
-        URL.revokeObjectURL(blobUrl)
-
-        if (file.size <= 2.5 * 1024 * 1024) {
+        // 2. If video is already <= 10 seconds and under 3.5 MB, we can keep the original directly!
+        if (duration <= 10 && file.size <= 3.5 * 1024 * 1024) {
+          clearTimeout(safetyTimeout)
           const reader = new FileReader()
           reader.onload = () => {
-            resolve({
+            finish({
               dataUrl: reader.result as string,
               thumbnailUrl: posterDataUrl,
               width,
@@ -403,26 +390,184 @@ export async function processVideo(file: File): Promise<CompressionResult> {
               type: 'video',
             })
           }
-          reader.onerror = fallbackResolve
+          reader.onerror = () => {
+            finish({
+              dataUrl: posterDataUrl,
+              thumbnailUrl: posterDataUrl,
+              width,
+              height,
+              sizeBytes: posterDataUrl.length,
+              type: 'video',
+            })
+          }
           reader.readAsDataURL(file)
-        } else {
-          resolve({
+          return
+        }
+
+        // 3. Trim video to the first 10 seconds using MediaRecorder
+        if (typeof MediaRecorder !== 'undefined') {
+          try {
+            const drawCanvas = document.createElement('canvas')
+            drawCanvas.width = width
+            drawCanvas.height = height
+            const drawCtx = drawCanvas.getContext('2d')
+            if (!drawCtx) throw new Error('No canvas context')
+
+            const stream = drawCanvas.captureStream ? drawCanvas.captureStream(24) : null
+            if (!stream) throw new Error('captureStream not supported')
+
+            // Also capture audio track if supported
+            try {
+              const audioStream = (video as any).captureStream ? (video as any).captureStream() : null
+              if (audioStream) {
+                const audioTracks = audioStream.getAudioTracks()
+                for (const t of audioTracks) stream.addTrack(t)
+              }
+            } catch {
+              // Audio track optional
+            }
+
+            const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
+              ? 'video/mp4;codecs=avc1'
+              : MediaRecorder.isTypeSupported('video/mp4')
+              ? 'video/mp4'
+              : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+              ? 'video/webm;codecs=vp8,opus'
+              : 'video/webm'
+
+            const recorder = new MediaRecorder(stream, {
+              mimeType,
+              videoBitsPerSecond: 1_200_000,
+            })
+
+            const chunks: BlobPart[] = []
+            recorder.ondataavailable = (e) => {
+              if (e.data && e.data.size > 0) chunks.push(e.data)
+            }
+
+            recorder.onstop = () => {
+              clearTimeout(safetyTimeout)
+              const trimmedBlob = new Blob(chunks, { type: mimeType })
+              const reader = new FileReader()
+              reader.onload = () => {
+                finish({
+                  dataUrl: reader.result as string,
+                  thumbnailUrl: posterDataUrl,
+                  width,
+                  height,
+                  sizeBytes: trimmedBlob.size,
+                  type: 'video',
+                })
+              }
+              reader.onerror = () => {
+                finish({
+                  dataUrl: posterDataUrl,
+                  thumbnailUrl: posterDataUrl,
+                  width,
+                  height,
+                  sizeBytes: posterDataUrl.length,
+                  type: 'video',
+                })
+              }
+              reader.readAsDataURL(trimmedBlob)
+            }
+
+            // Seek back to start and start recording
+            video.currentTime = 0
+            await new Promise<void>((r) => {
+              video.onseeked = () => r()
+              setTimeout(r, 400)
+            })
+
+            recorder.start(100)
+            await video.play()
+
+            let animId: number
+            const renderFrame = () => {
+              if (isFinished) return
+              drawCtx.drawImage(video, 0, 0, width, height)
+
+              // Stop recording when 10 seconds reached or video ended
+              if (video.currentTime >= clipDuration || video.ended || video.paused) {
+                cancelAnimationFrame(animId)
+                if (recorder.state === 'recording') {
+                  recorder.stop()
+                }
+                video.pause()
+                return
+              }
+              animId = requestAnimationFrame(renderFrame)
+            }
+            animId = requestAnimationFrame(renderFrame)
+
+            // Failsafe timer: stop after clipDuration + 1.5 seconds
+            setTimeout(() => {
+              if (recorder.state === 'recording') {
+                cancelAnimationFrame(animId)
+                recorder.stop()
+                video.pause()
+              }
+            }, (clipDuration + 1.5) * 1000)
+
+            return
+          } catch (recErr) {
+            console.warn('MediaRecorder trim attempt failed, using fragment fallback:', recErr)
+          }
+        }
+
+        // Fallback: Read file with #t=0,10 fragment to constrain playback
+        clearTimeout(safetyTimeout)
+        const reader = new FileReader()
+        reader.onload = () => {
+          let dataUrl = reader.result as string
+          if (!dataUrl.includes('#t=')) {
+            dataUrl = `${dataUrl}#t=0,10`
+          }
+          finish({
+            dataUrl,
+            thumbnailUrl: posterDataUrl,
+            width,
+            height,
+            sizeBytes: file.size,
+            type: 'video',
+          })
+        }
+        reader.onerror = () => {
+          finish({
             dataUrl: posterDataUrl,
             thumbnailUrl: posterDataUrl,
             width,
             height,
             sizeBytes: posterDataUrl.length,
-            type: 'image',
+            type: 'video',
           })
         }
-      } catch {
-        fallbackResolve()
+        reader.readAsDataURL(file.size > 5 * 1024 * 1024 ? file.slice(0, 5 * 1024 * 1024) : file)
+      } catch (err) {
+        clearTimeout(safetyTimeout)
+        const poster = createVideoFallbackPoster(file.name || 'Video Clip 🎥')
+        finish({
+          dataUrl: poster,
+          thumbnailUrl: poster,
+          width: 640,
+          height: 480,
+          sizeBytes: poster.length,
+          type: 'video',
+        })
       }
     }
 
     video.onerror = () => {
-      clearTimeout(timeout)
-      fallbackResolve()
+      clearTimeout(safetyTimeout)
+      const poster = createVideoFallbackPoster(file.name || 'Video Clip 🎥')
+      finish({
+        dataUrl: poster,
+        thumbnailUrl: poster,
+        width: 640,
+        height: 480,
+        sizeBytes: poster.length,
+        type: 'video',
+      })
     }
   })
 }
@@ -431,7 +576,11 @@ export async function processVideo(file: File): Promise<CompressionResult> {
  * Universal media processor: handles both images and videos safely on all devices
  */
 export async function processMediaFile(file: File): Promise<CompressionResult> {
-  if (file.type.startsWith('video/')) {
+  const isVideo =
+    file.type.startsWith('video/') ||
+    /\.(mp4|mov|m4v|webm|avi|mkv|3gp)$/i.test(file.name)
+
+  if (isVideo) {
     return processVideo(file)
   }
   return compressImage(file)
