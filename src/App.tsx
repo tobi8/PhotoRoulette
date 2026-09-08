@@ -402,9 +402,12 @@ export default function App() {
   // Auto-fill room code from URL hash (e.g. #ROOM12)
   // --------------------------------------------------------------------------
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search)
+    const queryRoom = searchParams.get('room')
     const hash = window.location.hash.replace('#', '').trim()
-    if (hash && hash.length >= 4) {
-      setInputRoomCode(formatRoomCode(hash))
+    const targetRoom = queryRoom || hash
+    if (targetRoom && targetRoom.length >= 4) {
+      setInputRoomCode(formatRoomCode(targetRoom))
       setLandingMode('JOIN_SETUP')
     }
   }, [])
