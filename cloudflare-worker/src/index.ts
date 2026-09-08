@@ -3,8 +3,10 @@ export interface Env {
   MEDIA_BUCKET?: R2Bucket;
 }
 
+type ItemRecord = { id: string; url: string; type: string; userId: string; timestamp: number };
+
 const roomSubscribers = new Map<string, Set<ReadableStreamDefaultController>>();
-const uploadedMemoryStore = new Map<string, Array<{ id: string; url: string; type: string; userId: string; timestamp: number }>>();
+const uploadedMemoryStore = new Map<string, Array<ItemRecord>>();
 const fileMemoryStore = new Map<string, { bytes: ArrayBuffer; mime: string }>();
 
 function broadcastToRoom(roomId: string, message: object) {
@@ -19,6 +21,79 @@ function broadcastToRoom(roomId: string, message: object) {
       subscribers.delete(controller);
     }
   }
+}
+
+function detectMime(fileName: string, declaredType: string | undefined, isVideo: boolean): string {
+  const extension = (fileName.split(".").pop() || "jpg").toLowerCase();
+  if (declaredType && declaredType !== "application/octet-stream") return declaredType;
+  if (isVideo) return extension === "mov" ? "video/quicktime" : "video/mp4";
+  if (extension === "png") return "image/png";
+  if (extension === "webp") return "image/webp";
+  if (extension === "heic") return "image/heic";
+  if (extension === "heif") return "image/heif";
+  return "image/jpeg";
+}
+
+function isVideoFile(declaredType: string | undefined, fieldName: string, fileName: string): boolean {
+  return !!(
+    declaredType?.startsWith("video/") ||
+    fieldName.toLowerCase().includes("video") ||
+    /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(fileName)
+  );
+}
+
+async function storeFile(
+  env: Env,
+  storageKey: string,
+  arrayBuf: ArrayBuffer,
+  mime: string,
+  roomId: string,
+  userId: string,
+  isVideo: boolean,
+): Promise<void> {
+  fileMemoryStore.set(storageKey, { bytes: arrayBuf, mime });
+
+  if (env.MEDIA_KV) {
+    try {
+      await env.MEDIA_KV.put(`file:${storageKey}`, arrayBuf, {
+        metadata: { mime, roomId, userId, type: isVideo ? "video" : "image" },
+        expirationTtl: 86400,
+      });
+    } catch {}
+  }
+
+  if (env.MEDIA_BUCKET) {
+    try {
+      await env.MEDIA_BUCKET.put(storageKey, arrayBuf, {
+        httpMetadata: { contentType: mime },
+        customMetadata: {
+          roomId,
+          userId,
+          uploadedAt: Date.now().toString(),
+        },
+      });
+    } catch {}
+  }
+}
+
+function appendToRoom(roomId: string, item: ItemRecord): void {
+  if (!uploadedMemoryStore.has(roomId)) {
+    uploadedMemoryStore.set(roomId, []);
+  }
+  uploadedMemoryStore.get(roomId)!.push(item);
+}
+
+async function persistRoomManifest(env: Env, roomId: string, userId: string, newItems: ItemRecord[]): Promise<void> {
+  if (!env.MEDIA_KV || newItems.length === 0) return;
+  try {
+    const roomKey = `room:${roomId}`;
+    const existingRaw = await env.MEDIA_KV.get(roomKey, "json");
+    const existingItems: Array<any> = Array.isArray(existingRaw) ? (existingRaw as any[]) : [];
+    const merged = [...existingItems.filter((i: any) => i.userId !== userId), ...newItems];
+    await env.MEDIA_KV.put(roomKey, JSON.stringify(merged), {
+      expirationTtl: 86400,
+    });
+  } catch {}
 }
 
 export default {
@@ -84,7 +159,7 @@ export default {
         });
       }
 
-      let allRoomItems: Array<{ id: string; url: string; type: string; userId: string; timestamp: number }> = [];
+      let allRoomItems: Array<ItemRecord> = [];
 
       if (env.MEDIA_KV) {
         try {
@@ -161,6 +236,123 @@ export default {
       return new Response("Not found", { status: 404, headers: corsHeaders });
     }
 
+    // ─── Single-file upload (for iOS Shortcuts) ─────────────────────────
+    // POST /upload-single?room=X&userId=Y&index=N&total=T
+    // Accepts one file per request to stay within Worker CPU/size limits.
+    if (request.method === "POST" && url.pathname === "/upload-single") {
+      let roomId = url.searchParams.get("room") || url.searchParams.get("roomId");
+      let userId = url.searchParams.get("userId") || "anonymous";
+      const index = parseInt(url.searchParams.get("index") || "0", 10);
+      const total = parseInt(url.searchParams.get("total") || "1", 10);
+
+      const contentType = request.headers.get("content-type") || "";
+
+      let arrayBuf: ArrayBuffer;
+      let fileName = "photo.jpg";
+      let declaredType: string | undefined;
+      let fieldName = "file";
+
+      if (contentType.includes("multipart/form-data")) {
+        const formData = await request.formData();
+        if (!roomId) {
+          roomId = (formData.get("room") as string) || (formData.get("roomId") as string) || null;
+        }
+        if (userId === "anonymous") {
+          const formUserId = formData.get("userId") as string;
+          if (formUserId) userId = formUserId;
+        }
+
+        let fileObj: File | null = null;
+        for (const [key, value] of formData.entries()) {
+          if (value && typeof value === "object" && typeof (value as any).arrayBuffer === "function") {
+            fileObj = value as File;
+            fieldName = key;
+            break;
+          }
+        }
+
+        if (!fileObj) {
+          return new Response(JSON.stringify({ error: "No file found in form data" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        arrayBuf = await fileObj.arrayBuffer();
+        fileName = fileObj.name || fileName;
+        declaredType = fileObj.type;
+      } else {
+        // Raw body upload with Content-Type header
+        arrayBuf = await request.arrayBuffer();
+        declaredType = contentType || undefined;
+        const ext = declaredType?.startsWith("video/") ? "mp4" : "jpg";
+        fileName = `upload_${index}.${ext}`;
+      }
+
+      if (!roomId) {
+        return new Response(JSON.stringify({ error: "Missing room parameter" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (arrayBuf.byteLength === 0) {
+        return new Response(JSON.stringify({ error: "Empty file" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Reject files larger than 10MB to stay within KV limits
+      if (arrayBuf.byteLength > 10 * 1024 * 1024) {
+        return new Response(JSON.stringify({ error: "File too large (max 10MB)" }), {
+          status: 413,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const isVideo = isVideoFile(declaredType, fieldName, fileName);
+      const extension = (fileName.split(".").pop() || "jpg").toLowerCase();
+      const fileId = `${crypto.randomUUID()}.${extension}`;
+      const storageKey = `${roomId}/${fileId}`;
+      const mime = detectMime(fileName, declaredType, isVideo);
+
+      await storeFile(env, storageKey, arrayBuf, mime, roomId, userId, isVideo);
+
+      const itemRecord: ItemRecord = {
+        id: fileId,
+        url: `${url.origin}/media/${storageKey}`,
+        type: isVideo ? "video" : "image",
+        userId,
+        timestamp: Date.now(),
+      };
+
+      appendToRoom(roomId, itemRecord);
+      await persistRoomManifest(env, roomId, userId, uploadedMemoryStore.get(roomId) || [itemRecord]);
+
+      // Broadcast SSE on every file so the frontend can show progress,
+      // but mark the last one so the UI knows the batch is complete.
+      const isLast = index >= total - 1;
+      broadcastToRoom(roomId, {
+        type: isLast ? "MEDIA_UPLOADED" : "MEDIA_PROGRESS",
+        roomId,
+        userId,
+        index,
+        total,
+        item: itemRecord,
+      });
+
+      const remaining = Math.max(0, total - index - 1);
+      return new Response(
+        JSON.stringify({ success: true, item: itemRecord, index, total, remaining }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // ─── Batch upload (for Android / legacy) ────────────────────────────
     if (request.method === "POST" && url.pathname === "/upload") {
       let roomId = url.searchParams.get("room") || url.searchParams.get("roomId");
       let userId = url.searchParams.get("userId");
@@ -188,7 +380,7 @@ export default {
         });
       }
 
-      const uploadedItems: Array<{ id: string; url: string; type: string; userId: string; timestamp: number }> = [];
+      const uploadedItems: Array<ItemRecord> = [];
 
       for (const [fieldName, value] of formData.entries()) {
         let fileObj: { arrayBuffer: () => Promise<ArrayBuffer>; name?: string; type?: string } | null = null;
@@ -201,56 +393,15 @@ export default {
           const extension = (fileName.split(".").pop() || "jpg").toLowerCase();
           const fileId = `${crypto.randomUUID()}.${extension}`;
           const storageKey = `${roomId}/${fileId}`;
-          const isVideo =
-            fileObj.type?.startsWith("video/") ||
-            fieldName.toLowerCase().includes("video") ||
-            /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(fileName);
-
-          let mime = fileObj.type;
-          if (!mime || mime === "application/octet-stream") {
-            if (isVideo) {
-              mime = extension === "mov" ? "video/quicktime" : "video/mp4";
-            } else if (extension === "png") {
-              mime = "image/png";
-            } else if (extension === "webp") {
-              mime = "image/webp";
-            } else if (extension === "heic") {
-              mime = "image/heic";
-            } else if (extension === "heif") {
-              mime = "image/heif";
-            } else {
-              mime = "image/jpeg";
-            }
-          }
+          const isVideo = isVideoFile(fileObj.type, fieldName, fileName);
+          const mime = detectMime(fileName, fileObj.type, isVideo);
 
           const arrayBuf = await fileObj.arrayBuffer();
           if (arrayBuf.byteLength === 0) continue;
 
-          fileMemoryStore.set(storageKey, { bytes: arrayBuf, mime });
+          await storeFile(env, storageKey, arrayBuf, mime, roomId, userId, isVideo);
 
-          if (env.MEDIA_KV) {
-            try {
-              await env.MEDIA_KV.put(`file:${storageKey}`, arrayBuf, {
-                metadata: { mime, roomId, userId, type: isVideo ? "video" : "image" },
-                expirationTtl: 86400,
-              });
-            } catch {}
-          }
-
-          if (env.MEDIA_BUCKET) {
-            try {
-              await env.MEDIA_BUCKET.put(storageKey, arrayBuf, {
-                httpMetadata: { contentType: mime },
-                customMetadata: {
-                  roomId,
-                  userId,
-                  uploadedAt: Date.now().toString(),
-                },
-              });
-            } catch {}
-          }
-
-          const itemRecord = {
+          const itemRecord: ItemRecord = {
             id: fileId,
             url: `${url.origin}/media/${storageKey}`,
             type: isVideo ? "video" : "image",
@@ -259,25 +410,11 @@ export default {
           };
 
           uploadedItems.push(itemRecord);
-
-          if (!uploadedMemoryStore.has(roomId)) {
-            uploadedMemoryStore.set(roomId, []);
-          }
-          uploadedMemoryStore.get(roomId)!.push(itemRecord);
+          appendToRoom(roomId, itemRecord);
         }
       }
 
-      if (env.MEDIA_KV && uploadedItems.length > 0) {
-        try {
-          const roomKey = `room:${roomId}`;
-          const existingRaw = await env.MEDIA_KV.get(roomKey, "json");
-          const existingItems: Array<any> = Array.isArray(existingRaw) ? (existingRaw as any[]) : [];
-          const merged = [...existingItems.filter((i: any) => i.userId !== userId), ...uploadedItems];
-          await env.MEDIA_KV.put(roomKey, JSON.stringify(merged), {
-            expirationTtl: 86400,
-          });
-        } catch {}
-      }
+      await persistRoomManifest(env, roomId, userId, uploadedMemoryStore.get(roomId) || uploadedItems);
 
       broadcastToRoom(roomId, {
         type: "MEDIA_UPLOADED",
@@ -301,3 +438,4 @@ export default {
     });
   },
 };
+
