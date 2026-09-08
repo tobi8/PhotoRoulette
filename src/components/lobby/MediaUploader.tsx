@@ -16,6 +16,7 @@ import {
   Film,
   Smartphone,
   Send,
+  Download,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
@@ -47,6 +48,7 @@ interface MediaUploaderProps {
   roomId?: string
   userId?: string
   workerUrl?: string
+  shortcutInstallUrl?: string
 }
 
 export const MediaUploader: React.FC<MediaUploaderProps> = ({
@@ -57,6 +59,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   roomId = 'DEFAULT_ROOM',
   userId = 'anonymous',
   workerUrl = 'https://photoroulette-worker.workers.dev',
+  shortcutInstallUrl = 'https://www.icloud.com/shortcuts/',
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
@@ -577,23 +580,36 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 </button>
               )}
 
-              <button
-                onClick={() => setIsShortcutModalOpen(true)}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-900/40 via-indigo-900/30 to-violet-900/40 hover:from-blue-900/60 hover:to-violet-900/60 border border-blue-400/40 transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-blue-950/40 active:scale-98"
-              >
-                <div className="flex items-center gap-3 text-left">
-                  <div className="w-12 h-12 rounded-xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-300 shrink-0">
-                    <Send size={24} />
+              <div className="flex gap-2">
+                <a
+                  href={shortcutInstallUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="py-3 px-3.5 rounded-2xl bg-violet-900/40 hover:bg-violet-900/60 border border-violet-400/40 text-violet-200 text-xs font-bold flex items-center justify-center gap-1.5 shrink-0 transition-all active:scale-98"
+                  title="Install Apple Shortcut on your phone"
+                >
+                  <Download size={16} />
+                  <span>Get Shortcut</span>
+                </a>
+
+                <button
+                  onClick={() => setIsShortcutModalOpen(true)}
+                  className="flex-1 p-3 rounded-2xl bg-gradient-to-r from-blue-900/40 via-indigo-900/30 to-violet-900/40 hover:from-blue-900/60 hover:to-violet-900/60 border border-blue-400/40 transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-blue-950/40 active:scale-98 text-left"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-300 shrink-0">
+                      <Send size={18} />
+                    </div>
+                    <div>
+                      <div className="font-black text-white text-xs">Import 20 via iOS Shortcut</div>
+                      <div className="text-[11px] text-blue-300/80">Auto-pick 20 random items on iOS</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="font-black text-white text-sm">📲 Import 20 via iOS Shortcut</div>
-                    <div className="text-xs text-blue-300/80">Auto-filter 20 random items on iPhone/iPad</div>
-                  </div>
-                </div>
-                <span className="text-xs bg-blue-500/20 text-blue-300 px-2.5 py-1 rounded-full font-bold border border-blue-500/30">
-                  iOS
-                </span>
-              </button>
+                  <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full font-bold border border-blue-500/30">
+                    iOS
+                  </span>
+                </button>
+              </div>
 
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -792,8 +808,28 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
             <div className="space-y-3 text-xs text-gray-300">
               <p>
-                Run the official Apple Shortcut to randomly pick 20 media items, optimize photos to 1200px, encode videos to 720p, and submit directly to this room.
+                Use the Apple Shortcut to automatically pick 20 random photos/videos, optimize them, and upload directly to room {roomId}.
               </p>
+
+              <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-2">
+                <div className="font-bold text-white flex items-center gap-2">
+                  <Download size={14} className="text-violet-400" />
+                  <span>First time setup:</span>
+                </div>
+                <p className="text-[11px] text-gray-300">
+                  Tap below to add the &ldquo;PhotoRouletteUpload&rdquo; shortcut to your Apple Shortcuts app.
+                </p>
+                <a
+                  href={shortcutInstallUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold flex items-center justify-center gap-2 transition-all shadow-md active:scale-98 text-center text-xs"
+                >
+                  <Download size={15} />
+                  <span>📥 Download / Import Shortcut to iPhone</span>
+                </a>
+              </div>
+
               <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1 font-mono text-[11px] text-gray-400">
                 <div>Room: <span className="text-violet-300 font-bold">{roomId}</span></div>
                 <div>User ID: <span className="text-emerald-300 font-bold">{userId}</span></div>
@@ -801,7 +837,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               </div>
             </div>
 
-            <div className="space-y-2 pt-2">
+            <div className="space-y-2 pt-1">
               <Button
                 variant="primary"
                 size="lg"
@@ -810,7 +846,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 className="bg-blue-600 hover:bg-blue-500 text-sm py-3 font-bold"
               >
                 <Send size={16} />
-                <span>Open in Apple Shortcuts</span>
+                <span>⚡ Run Shortcut for Room ({roomId})</span>
               </Button>
 
               {isWaitingForShortcut && (
