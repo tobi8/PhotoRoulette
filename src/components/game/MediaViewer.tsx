@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ShieldAlert, AlertTriangle, Volume2, VolumeX, Film } from 'lucide-react'
+import { ShieldAlert, AlertTriangle, Film } from 'lucide-react'
 
 interface MediaViewerProps {
   media: {
@@ -12,6 +12,7 @@ interface MediaViewerProps {
   isVetoed?: boolean
   isTimeUp?: boolean
   isHostTV?: boolean
+  isMuted?: boolean
 }
 
 export const MediaViewer: React.FC<MediaViewerProps> = ({
@@ -21,9 +22,9 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
   isVetoed = false,
   isTimeUp = false,
   isHostTV = false,
+  isMuted = false,
 }) => {
   const [blurAmount, setBlurAmount] = useState(progressiveBlur ? 24 : 0)
-  const [isMuted, setIsMuted] = useState(true)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   // Manage video playback: automatically pauses when time expires, vetoed, or reaches 10s
@@ -38,7 +39,6 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
           // Guaranteed fallback if browser requires muted autoplay
           if (videoRef.current) {
             videoRef.current.muted = true
-            setIsMuted(true)
             videoRef.current.play().catch(() => {})
           }
         })
@@ -46,22 +46,17 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
     }
   }, [media.type, isTimeUp, isVetoed, media.id, isMuted])
 
+  // Sync mute dynamically when user toggles global sound during video playback
+  useEffect(() => {
+    if (media.type === 'video' && videoRef.current) {
+      videoRef.current.muted = isMuted
+    }
+  }, [isMuted, media.type])
+
   const handleTimeUpdate = () => {
     // Strictly cap playback at 10 seconds max
     if (videoRef.current && videoRef.current.currentTime >= 10) {
       videoRef.current.pause()
-    }
-  }
-
-  const toggleMute = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (videoRef.current) {
-      const nextMuted = !isMuted
-      videoRef.current.muted = nextMuted
-      setIsMuted(nextMuted)
-      if (!nextMuted) {
-        videoRef.current.play().catch(() => {})
-      }
     }
   }
 
@@ -118,21 +113,6 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
               <Film size={12} className="text-violet-400" />
               <span>Video (Max 10s)</span>
             </div>
-
-            {/* Audio Toggle Button */}
-            <button
-              type="button"
-              onClick={toggleMute}
-              className="absolute bottom-3 right-3 p-2 rounded-full bg-black/70 hover:bg-black/90 text-white backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform active:scale-90 z-10"
-              title={isMuted ? 'Unmute video audio' : 'Mute video audio'}
-              aria-label="Toggle video sound"
-            >
-              {isMuted ? (
-                <VolumeX size={18} className="text-red-400" />
-              ) : (
-                <Volume2 size={18} className="text-violet-400" />
-              )}
-            </button>
           </div>
         ) : (
           <img

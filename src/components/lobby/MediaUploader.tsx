@@ -244,17 +244,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     }
   }
 
-  // 1-Tap Instant Auto-Roll (Demo / Mock)
-  const handleInstantAutoRoll = async () => {
-    await loadMockPhotosWithTestDocument(mediaType)
-    setTimeout(() => {
-      const approved = getApprovedMedia(mediaType)
-      onMediaReady(approved)
-      if (!isReady) {
-        onToggleReady()
-      }
-    }, 150)
-  }
 
   // Reroll photos in roulette pool
   const handleReroll = async () => {
@@ -480,30 +469,6 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </button>
           )}
 
-
-          <div className="flex items-center gap-2">
-            <div className="h-px bg-white/10 flex-1" />
-            <span className="text-[10px] text-gray-500 font-bold uppercase">OR</span>
-            <div className="h-px bg-white/10 flex-1" />
-          </div>
-
-          {/* Instant 1-tap auto roll (demo mode) */}
-          <Button
-            variant="secondary"
-            size="md"
-            fullWidth
-            onClick={handleInstantAutoRoll}
-            className="border-violet-500/30 text-xs text-violet-200 py-3"
-          >
-            <Shuffle size={16} className="text-amber-400" />
-            <span>
-              {mediaType === 'videos_only'
-                ? '⚡ Instant Demo Videos (Try Game Now)'
-                : mediaType === 'photos_only'
-                ? '⚡ Instant Demo Photos (Try Game Now)'
-                : '⚡ Instant Demo Memories (Photos & Videos)'}
-            </span>
-          </Button>
         </div>
       )}
 

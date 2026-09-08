@@ -16,7 +16,7 @@ export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
   currentPlayerId,
   roundNumber,
   totalRounds,
-  autoAdvanceSeconds = 3,
+  autoAdvanceSeconds = 5,
 }) => {
   const [secondsLeft, setSecondsLeft] = useState(autoAdvanceSeconds)
 

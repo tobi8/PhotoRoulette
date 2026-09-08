@@ -902,7 +902,7 @@ export default function App() {
     }, 2500)
   }
 
-  // Step 4: Advance to Leaderboard Race & Auto-Advance after 3.5 seconds
+  // Step 4: Advance to Leaderboard Race & Auto-Advance after 5 seconds
   const advanceToScoreboard = (currentPlayersList?: Player[]) => {
     clearAutoTimer()
     const activePlayers = currentPlayersList || players
@@ -915,11 +915,11 @@ export default function App() {
       payload: { players: activePlayers },
     })
 
-    // AUTOMATIC TRANSITION: Advance to Next Round after 3.5 seconds!
+    // AUTOMATIC TRANSITION: Advance to Next Round after 5 seconds!
     autoAdvanceTimerRef.current = setTimeout(() => {
       currentRoundIndexRef.current++
       runNextRound(activeRound.roundNumber + 1, activePlayers)
-    }, 3500)
+    }, 5000)
   }
 
   // Manual fallback override if host wants to advance immediately
@@ -1072,24 +1072,6 @@ export default function App() {
                   <Users size={20} className="text-violet-400" />
                   <span>Join Game (Player)</span>
                 </Button>
-
-                {/* Instant Solo Demo */}
-                <div className="pt-2">
-                  <button
-                    onClick={async () => {
-                      setInputName('You')
-                      await startHostGame()
-                      setTimeout(() => {
-                        addSimulatedBot()
-                        addSimulatedBot()
-                      }, 400)
-                    }}
-                    className="w-full py-2.5 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-violet-300 border border-violet-500/20 flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                  >
-                    <Zap size={14} className="text-amber-400" />
-                    <span>Instant Demo Mode (Play with Bot Friends)</span>
-                  </button>
-                </div>
               </div>
             )}
 
@@ -1234,16 +1216,6 @@ export default function App() {
                 {/* Host Control Actions */}
                 {currentPlayer?.isHost && (
                   <div className="space-y-2 pt-2">
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={addSimulatedBot}
-                        className="flex-1 text-xs"
-                      >
-                        <Users size={14} /> Add Bot Player
-                      </Button>
-                    </div>
 
                     <Button
                       size="xl"
@@ -1312,6 +1284,7 @@ export default function App() {
               isVetoed={activeRound.isVetoed}
               isTimeUp={phase !== 'ACTIVE_ROUND'}
               isHostTV={settings.tvMode && currentPlayer?.isHost}
+              isMuted={isMuted}
             />
 
             {/* Owner Panic Button (visible ONLY to the owner of this active photo) */}
@@ -1347,25 +1320,11 @@ export default function App() {
               isHostTV={settings.tvMode && currentPlayer?.isHost}
               autoAdvanceSeconds={3}
             />
-
-            {/* Manual Skip Button if host wants to advance immediately */}
-            {currentPlayer?.isHost && (
-              <Button
-                size="md"
-                variant="outline"
-                fullWidth
-                onClick={() => advanceToScoreboard()}
-                className="text-xs text-gray-300"
-              >
-                <span>Skip to Scoreboard Now</span>
-                <ArrowRight size={14} />
-              </Button>
-            )}
           </div>
         )}
 
         {/* ==================================================================== */}
-        {/* 6. LEADERBOARD SCREEN (Automatically advances to next round in 3s) */}
+        {/* 6. LEADERBOARD SCREEN (Automatically advances to next round in 5s) */}
         {/* ==================================================================== */}
         {phase === 'LEADERBOARD' && (
           <div className="w-full max-w-lg mx-auto space-y-4 py-4 animate-in fade-in duration-200">
@@ -1374,28 +1333,8 @@ export default function App() {
               currentPlayerId={currentPlayer?.id}
               roundNumber={activeRound.roundNumber}
               totalRounds={activeRound.totalRounds}
-              autoAdvanceSeconds={3}
+              autoAdvanceSeconds={5}
             />
-
-            {/* Manual Skip Button if host wants to advance immediately */}
-            {currentPlayer?.isHost && (
-              <div className="pt-2">
-                <Button
-                  size="md"
-                  variant="outline"
-                  fullWidth
-                  onClick={handleNextRoundFromLeaderboard}
-                  className="text-xs text-gray-300"
-                >
-                  <span>
-                    {activeRound.roundNumber >= activeRound.totalRounds
-                      ? 'Skip to Final Podium Celebration'
-                      : 'Skip to Next Round Now'}
-                  </span>
-                  <ArrowRight size={14} />
-                </Button>
-              </div>
-            )}
           </div>
         )}
 
