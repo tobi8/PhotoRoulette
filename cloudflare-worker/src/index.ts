@@ -1,9 +1,10 @@
 export interface Env {
-  MEDIA_BUCKET: R2Bucket;
+  MEDIA_BUCKET?: R2Bucket;
 }
 
 const roomSubscribers = new Map<string, Set<ReadableStreamDefaultController>>();
 const uploadedMemoryStore = new Map<string, Array<{ id: string; url: string; type: string; userId: string; timestamp: number }>>();
+const fileMemoryStore = new Map<string, { bytes: ArrayBuffer; mime: string }>();
 
 function broadcastToRoom(roomId: string, message: object) {
   const subscribers = roomSubscribers.get(roomId);
@@ -96,20 +97,30 @@ export default {
 
     if (request.method === "GET" && url.pathname.startsWith("/media/")) {
       const key = decodeURIComponent(url.pathname.replace(/^\/media\//, ""));
-      if (!env.MEDIA_BUCKET) {
-        return new Response("Bucket not configured", { status: 500, headers: corsHeaders });
+
+      if (env.MEDIA_BUCKET) {
+        const object = await env.MEDIA_BUCKET.get(key);
+        if (object) {
+          const headers = new Headers();
+          object.writeHttpMetadata(headers);
+          headers.set("Access-Control-Allow-Origin", origin);
+          headers.set("Cache-Control", "public, max-age=86400");
+          return new Response(object.body, { headers });
+        }
       }
 
-      const object = await env.MEDIA_BUCKET.get(key);
-      if (!object) {
-        return new Response("Not found", { status: 404, headers: corsHeaders });
+      const memFile = fileMemoryStore.get(key);
+      if (memFile) {
+        return new Response(memFile.bytes, {
+          headers: {
+            ...corsHeaders,
+            "Content-Type": memFile.mime,
+            "Cache-Control": "public, max-age=86400",
+          },
+        });
       }
 
-      const headers = new Headers();
-      object.writeHttpMetadata(headers);
-      headers.set("Access-Control-Allow-Origin", origin);
-      headers.set("Cache-Control", "public, max-age=86400");
-      return new Response(object.body, { headers });
+      return new Response("Not found", { status: 404, headers: corsHeaders });
     }
 
     if (request.method === "POST" && url.pathname === "/upload") {
@@ -141,18 +152,22 @@ export default {
           const fileId = `${crypto.randomUUID()}.${extension}`;
           const storageKey = `${roomId}/${fileId}`;
           const isVideo = file.type.startsWith("video/") || fieldName.toLowerCase().includes("video") || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(file.name);
+          const mime = file.type || (isVideo ? "video/mp4" : "image/jpeg");
+
+          const arrayBuf = await file.arrayBuffer();
+          fileMemoryStore.set(storageKey, { bytes: arrayBuf, mime });
 
           if (env.MEDIA_BUCKET) {
-            await env.MEDIA_BUCKET.put(storageKey, file.stream(), {
-              httpMetadata: {
-                contentType: file.type || (isVideo ? "video/mp4" : "image/jpeg"),
-              },
-              customMetadata: {
-                roomId,
-                userId,
-                uploadedAt: Date.now().toString(),
-              },
-            });
+            try {
+              await env.MEDIA_BUCKET.put(storageKey, arrayBuf, {
+                httpMetadata: { contentType: mime },
+                customMetadata: {
+                  roomId,
+                  userId,
+                  uploadedAt: Date.now().toString(),
+                },
+              });
+            } catch {}
           }
 
           const itemRecord = {

@@ -17,6 +17,7 @@ import {
   Smartphone,
   Send,
   Download,
+  Copy,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
@@ -58,7 +59,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   mediaType = 'mixed',
   roomId = 'DEFAULT_ROOM',
   userId = 'anonymous',
-  workerUrl = 'https://photoroulette-worker.workers.dev',
+  workerUrl = 'https://photoroulette-worker.paper-scent.workers.dev',
   shortcutInstallUrl = 'https://www.icloud.com/shortcuts/',
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -69,11 +70,21 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const [isPreparing, setIsPreparing] = useState<boolean>(false)
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState<boolean>(false)
   const [isWaitingForShortcut, setIsWaitingForShortcut] = useState<boolean>(false)
+  const [copiedUrl, setCopiedUrl] = useState<boolean>(false)
   const [customShortcutUrl, setCustomShortcutUrl] = useState<string>(() => {
     return localStorage.getItem('photoroulette_shortcut_url') || shortcutInstallUrl
   })
   const [isEditingUrl, setIsEditingUrl] = useState<boolean>(false)
   const [inputUrl, setInputUrl] = useState<string>(customShortcutUrl)
+
+  const handleCopyEndpoint = async () => {
+    const fullUrl = `${workerUrl}/upload?room=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`
+    try {
+      await navigator.clipboard.writeText(fullUrl)
+      setCopiedUrl(true)
+      setTimeout(() => setCopiedUrl(false), 2000)
+    } catch {}
+  }
 
   const handleSaveUrl = () => {
     const trimmed = inputUrl.trim()
@@ -625,6 +636,25 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 </button>
               </div>
 
+              <a
+                href="./PhotoRoulette.apk"
+                download="PhotoRoulette.apk"
+                className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/50 via-teal-950/40 to-slate-900/50 hover:from-emerald-950/70 hover:to-teal-950/60 border border-emerald-500/30 transition-all flex items-center justify-between gap-3 cursor-pointer shadow-md active:scale-98 text-left"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-600/25 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shrink-0">
+                    <Download size={18} />
+                  </div>
+                  <div>
+                    <div className="font-black text-white text-xs">📲 Download Android App (APK)</div>
+                    <div className="text-[11px] text-emerald-300/80">Install for 1-tap silent random media picking</div>
+                  </div>
+                </div>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-full font-bold border border-emerald-500/30">
+                  APK
+                </span>
+              </a>
+
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full p-4 rounded-2xl bg-gradient-to-br from-violet-900/40 via-purple-900/30 to-indigo-900/40 hover:from-violet-900/60 hover:to-indigo-900/60 border-2 border-dashed border-violet-400/50 hover:border-violet-300 transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-violet-950/40 active:scale-98"
@@ -876,10 +906,27 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 )}
               </div>
 
-              <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1 font-mono text-[11px] text-gray-400">
-                <div>Room: <span className="text-violet-300 font-bold">{roomId}</span></div>
-                <div>User ID: <span className="text-emerald-300 font-bold">{userId}</span></div>
-                <div>Endpoint: <span className="text-cyan-300 truncate block">{workerUrl}/upload</span></div>
+              <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-2 font-mono text-[11px] text-gray-400">
+                <div className="flex justify-between items-center">
+                  <div>Room: <span className="text-violet-300 font-bold">{roomId}</span></div>
+                  <div>User ID: <span className="text-emerald-300 font-bold">{userId}</span></div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-gray-400 font-sans mb-1">Shortcut Upload URL:</div>
+                  <div className="flex items-center gap-1.5 bg-black/40 p-1.5 rounded-lg border border-white/10">
+                    <span className="text-cyan-300 truncate block text-[10px] flex-1 select-all">
+                      {`${workerUrl}/upload?room=${roomId}&userId=${userId}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyEndpoint}
+                      className="px-2 py-1 bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 rounded font-sans text-[10px] shrink-0 flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      {copiedUrl ? <Check size={12} /> : <Copy size={12} />}
+                      <span>{copiedUrl ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 

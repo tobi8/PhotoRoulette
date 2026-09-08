@@ -1,11 +1,5 @@
 {
   "name": "photoroulette-worker",
   "main": "src/index.ts",
-  "compatibility_date": "2025-02-24",
-  "r2_buckets": [
-    {
-      "binding": "MEDIA_BUCKET",
-      "bucket_name": "photoroulette-media"
-    }
-  ]
+  "compatibility_date": "2025-02-24"
 }
