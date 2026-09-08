@@ -110,6 +110,64 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     await processAndLoadFiles(fileArray)
   }
 
+  const handleNativePaste = async (e: React.ClipboardEvent) => {
+    const clipboardFiles = e.clipboardData?.files
+    if (clipboardFiles && clipboardFiles.length > 0) {
+      e.preventDefault()
+      const validFiles = Array.from(clipboardFiles).filter(
+        (f) => f.type.startsWith("image/") || f.type.startsWith("video/")
+      )
+      if (validFiles.length > 0) {
+        await processAndLoadFiles(validFiles)
+        return
+      }
+    }
+
+    const text = e.clipboardData?.getData("text/plain")
+    if (text) {
+      e.preventDefault()
+      handlePastedText(text)
+    }
+  }
+
+  const handlePastedText = (text: string) => {
+    const dataUrls: string[] = []
+    if (text.startsWith("[") || text.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(text)
+        if (Array.isArray(parsed)) {
+          for (const entry of parsed) {
+            if (typeof entry === "string" && entry.startsWith("data:image")) {
+              dataUrls.push(entry)
+            } else if (entry && typeof entry === "object" && entry.data) {
+              dataUrls.push(entry.data)
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (dataUrls.length === 0 && text.includes("data:image")) {
+      const lines = text.split(/[\r\n]+/).map((s) => s.trim()).filter((s) => s.startsWith("data:image"))
+      dataUrls.push(...lines)
+    }
+
+    if (dataUrls.length > 0) {
+      const selected = dataUrls.slice(0, 20)
+      const mapped = selected.map((url, idx) => ({
+        id: `paste_${Date.now()}_${idx}`,
+        type: "image" as const,
+        dataUrl: url,
+      }))
+      loadExistingMedia(mapped)
+      onMediaReady(mapped)
+      if (!isReady) {
+        onToggleReady()
+      }
+      setStatusMessage(`${mapped.length} photos ready!`)
+    }
+  }
+
   const handlePasteFromClipboard = async () => {
     setIsPreparing(true)
     setStatusMessage("Reading photos from clipboard...")
@@ -124,25 +182,8 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               if (type === "text/plain" || type === "text/uri-list") {
                 const blob = await item.getType(type)
                 const text = await blob.text()
-                if (text.startsWith("[") || text.startsWith("{") || text.startsWith("data:image")) {
-                  try {
-                    const parsed = JSON.parse(text)
-                    if (Array.isArray(parsed)) {
-                      for (const entry of parsed) {
-                        if (typeof entry === "string" && entry.startsWith("data:image")) {
-                          dataUrls.push(entry)
-                        } else if (entry && typeof entry === "object" && entry.data) {
-                          dataUrls.push(entry.data)
-                        }
-                      }
-                    }
-                  } catch {
-                    if (text.startsWith("data:image")) {
-                      const lines = text.split(/[\r\n]+/).map((s) => s.trim()).filter((s) => s.startsWith("data:image"))
-                      dataUrls.push(...lines)
-                    }
-                  }
-                }
+                handlePastedText(text)
+                return
               } else if (type.startsWith("image/")) {
                 const blob = await item.getType(type)
                 const file = new File([blob], `pasted_${Date.now()}_${dataUrls.length}.jpg`, { type: blob.type })
@@ -160,51 +201,33 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         try {
           const text = await navigator.clipboard.readText()
           if (text) {
-            try {
-              const parsed = JSON.parse(text)
-              if (Array.isArray(parsed)) {
-                for (const entry of parsed) {
-                  if (typeof entry === "string" && entry.startsWith("data:image")) {
-                    dataUrls.push(entry)
-                  } else if (entry && typeof entry === "object" && entry.data) {
-                    dataUrls.push(entry.data)
-                  }
-                }
-              }
-            } catch {
-              const lines = text.split(/[\r\n]+/).map((s) => s.trim()).filter((s) => s.startsWith("data:image"))
-              if (lines.length > 0) {
-                dataUrls.push(...lines)
-              }
-            }
+            handlePastedText(text)
+            return
           }
         } catch (e) {
           console.warn(e)
         }
       }
 
-      if (dataUrls.length === 0) {
-        setStatusMessage("No photos found on clipboard. Run the shortcut first.")
-        setIsPreparing(false)
-        return
+      if (dataUrls.length > 0) {
+        const selected = dataUrls.slice(0, 20)
+        const mapped = selected.map((url, idx) => ({
+          id: `paste_${Date.now()}_${idx}`,
+          type: "image" as const,
+          dataUrl: url,
+        }))
+        loadExistingMedia(mapped)
+        onMediaReady(mapped)
+        if (!isReady) {
+          onToggleReady()
+        }
+        setStatusMessage(`${mapped.length} photos ready!`)
+      } else {
+        setStatusMessage("Tap button and select 'Paste' (Einsetzen) from popup.")
       }
-
-      const selected = dataUrls.slice(0, 20)
-      const mapped = selected.map((url, idx) => ({
-        id: `paste_${Date.now()}_${idx}`,
-        type: "image" as const,
-        dataUrl: url,
-      }))
-
-      loadExistingMedia(mapped)
-      onMediaReady(mapped)
-      if (!isReady) {
-        onToggleReady()
-      }
-      setStatusMessage(`${mapped.length} photos ready!`)
     } catch (err: any) {
       console.error(err)
-      setStatusMessage("Clipboard access denied or empty.")
+      setStatusMessage("Tap button and select 'Paste' (Einsetzen) from popup.")
     } finally {
       setIsPreparing(false)
       setTimeout(() => setStatusMessage(null), 4000)
@@ -395,24 +418,30 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </>
           ) : (
             <div className="space-y-2">
-              <button
-                type="button"
+              <div
+                contentEditable
+                suppressContentEditableWarning
+                onPaste={handleNativePaste}
                 onClick={handlePasteFromClipboard}
-                disabled={isPreparing}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left disabled:opacity-50"
+                className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer outline-none"
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 pointer-events-none">
                   <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
                     <Clipboard size={24} />
                   </div>
-                  <div className="font-extrabold text-white text-base">
-                    Paste 20 Photos from Clipboard
+                  <div>
+                    <div className="font-extrabold text-white text-base">
+                      Paste 20 Photos from Clipboard
+                    </div>
+                    <div className="text-xs text-blue-200/90 font-normal mt-0.5">
+                      Tap or long-press to Paste
+                    </div>
                   </div>
                 </div>
-                <span className="text-xs bg-white/20 text-white px-3 py-1.5 rounded-full font-bold shrink-0">
+                <span className="text-xs bg-white/20 text-white px-3 py-1.5 rounded-full font-bold shrink-0 pointer-events-none">
                   Paste
                 </span>
-              </button>
+              </div>
 
               <a
                 href={SHORTCUT_URL}
@@ -495,16 +524,16 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 <RefreshCw size={14} /> Reroll
               </Button>
             ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                fullWidth
+              <div
+                contentEditable
+                suppressContentEditableWarning
+                onPaste={handleNativePaste}
                 onClick={handlePasteFromClipboard}
-                disabled={isPreparing}
-                className="border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs py-2"
+                className="w-full p-2.5 rounded-xl border border-blue-500/30 text-blue-300 hover:bg-blue-950/30 text-xs flex items-center justify-center gap-2 cursor-pointer font-bold outline-none"
               >
-                <Clipboard size={14} /> Paste New
-              </Button>
+                <Clipboard size={14} className="pointer-events-none" />
+                <span className="pointer-events-none">Paste New</span>
+              </div>
             )}
           </div>
         </div>
