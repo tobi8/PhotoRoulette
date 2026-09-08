@@ -42,6 +42,15 @@ function isVideoFile(declaredType: string | undefined, fieldName: string, fileNa
   );
 }
 
+function cleanParam(val: string | null): string | null {
+  if (!val) return null;
+  val = val.trim();
+  if (val.includes("?")) {
+    val = val.split("?")[0];
+  }
+  return val;
+}
+
 async function storeFile(
   env: Env,
   storageKey: string,
@@ -51,7 +60,10 @@ async function storeFile(
   userId: string,
   isVideo: boolean,
 ): Promise<void> {
-  fileMemoryStore.set(storageKey, { bytes: arrayBuf, mime });
+  // Only keep in memory if KV is not available (avoids worker OOM)
+  if (!env.MEDIA_KV && !env.MEDIA_BUCKET) {
+    fileMemoryStore.set(storageKey, { bytes: arrayBuf, mime });
+  }
 
   if (env.MEDIA_KV) {
     try {
@@ -59,7 +71,9 @@ async function storeFile(
         metadata: { mime, roomId, userId, type: isVideo ? "video" : "image" },
         expirationTtl: 86400,
       });
-    } catch {}
+    } catch (e) {
+      fileMemoryStore.set(storageKey, { bytes: arrayBuf, mime });
+    }
   }
 
   if (env.MEDIA_BUCKET) {
@@ -353,9 +367,10 @@ export default {
     }
 
     // ─── Batch upload (for Android / legacy) ────────────────────────────
+    // ─── Batch upload (for iOS Shortcut / Android) ─────────────────────
     if (request.method === "POST" && url.pathname === "/upload") {
-      let roomId = url.searchParams.get("room") || url.searchParams.get("roomId");
-      let userId = url.searchParams.get("userId");
+      let roomId = cleanParam(url.searchParams.get("room") || url.searchParams.get("roomId"));
+      let userId = cleanParam(url.searchParams.get("userId"));
 
       const contentType = request.headers.get("content-type") || "";
       if (!contentType.includes("multipart/form-data")) {
@@ -367,10 +382,10 @@ export default {
 
       const formData = await request.formData();
       if (!roomId) {
-        roomId = (formData.get("room") as string) || (formData.get("roomId") as string) || null;
+        roomId = cleanParam((formData.get("room") as string) || (formData.get("roomId") as string) || null);
       }
       if (!userId) {
-        userId = (formData.get("userId") as string) || "anonymous";
+        userId = cleanParam((formData.get("userId") as string) || "anonymous");
       }
 
       if (!roomId) {
@@ -380,7 +395,7 @@ export default {
         });
       }
 
-      const uploadedItems: Array<ItemRecord> = [];
+      const fileTasks: Array<Promise<ItemRecord | null>> = [];
 
       for (const [fieldName, value] of formData.entries()) {
         let fileObj: { arrayBuffer: () => Promise<ArrayBuffer>; name?: string; type?: string } | null = null;
@@ -396,32 +411,49 @@ export default {
           const isVideo = isVideoFile(fileObj.type, fieldName, fileName);
           const mime = detectMime(fileName, fileObj.type, isVideo);
 
-          const arrayBuf = await fileObj.arrayBuffer();
-          if (arrayBuf.byteLength === 0) continue;
+          fileTasks.push(
+            (async () => {
+              try {
+                const arrayBuf = await fileObj!.arrayBuffer();
+                if (arrayBuf.byteLength === 0) return null;
+                if (arrayBuf.byteLength > 25 * 1024 * 1024) return null;
 
-          await storeFile(env, storageKey, arrayBuf, mime, roomId, userId, isVideo);
+                await storeFile(env, storageKey, arrayBuf, mime, roomId!, userId!, isVideo);
 
-          const itemRecord: ItemRecord = {
-            id: fileId,
-            url: `${url.origin}/media/${storageKey}`,
-            type: isVideo ? "video" : "image",
-            userId,
-            timestamp: Date.now(),
-          };
-
-          uploadedItems.push(itemRecord);
-          appendToRoom(roomId, itemRecord);
+                const itemRecord: ItemRecord = {
+                  id: fileId,
+                  url: `${url.origin}/media/${storageKey}`,
+                  type: isVideo ? "video" : "image",
+                  userId: userId!,
+                  timestamp: Date.now(),
+                };
+                return itemRecord;
+              } catch (e) {
+                console.error("Failed to store file:", e);
+                return null;
+              }
+            })()
+          );
         }
       }
 
-      await persistRoomManifest(env, roomId, userId, uploadedMemoryStore.get(roomId) || uploadedItems);
+      const results = await Promise.all(fileTasks);
+      const uploadedItems: Array<ItemRecord> = results.filter((item): item is ItemRecord => item !== null);
 
-      broadcastToRoom(roomId, {
-        type: "MEDIA_UPLOADED",
-        roomId,
-        userId,
-        items: uploadedItems,
-      });
+      for (const item of uploadedItems) {
+        appendToRoom(roomId, item);
+      }
+
+      if (uploadedItems.length > 0) {
+        await persistRoomManifest(env, roomId, userId, uploadedMemoryStore.get(roomId) || uploadedItems);
+
+        broadcastToRoom(roomId, {
+          type: "MEDIA_UPLOADED",
+          roomId,
+          userId,
+          items: uploadedItems,
+        });
+      }
 
       return new Response(
         JSON.stringify({ success: true, count: uploadedItems.length, items: uploadedItems }),

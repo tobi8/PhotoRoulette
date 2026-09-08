@@ -243,13 +243,12 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   }
 
   const handleIOSShortcutTrigger = () => {
-    const uploadEndpoint = `${workerUrl}/upload-single?room=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(effectiveUserId)}`
+    const uploadEndpoint = `${workerUrl}/upload?room=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(effectiveUserId)}`
     const payload = encodeURIComponent(
       JSON.stringify({
         room: roomId,
         userId: effectiveUserId,
         endpoint: uploadEndpoint,
-        total: 20,
       })
     )
     const shortcutName = encodeURIComponent(activeShortcut.name)
