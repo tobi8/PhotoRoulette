@@ -69,6 +69,20 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const [isPreparing, setIsPreparing] = useState<boolean>(false)
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState<boolean>(false)
   const [isWaitingForShortcut, setIsWaitingForShortcut] = useState<boolean>(false)
+  const [customShortcutUrl, setCustomShortcutUrl] = useState<string>(() => {
+    return localStorage.getItem('photoroulette_shortcut_url') || shortcutInstallUrl
+  })
+  const [isEditingUrl, setIsEditingUrl] = useState<boolean>(false)
+  const [inputUrl, setInputUrl] = useState<string>(customShortcutUrl)
+
+  const handleSaveUrl = () => {
+    const trimmed = inputUrl.trim()
+    if (trimmed) {
+      setCustomShortcutUrl(trimmed)
+      localStorage.setItem('photoroulette_shortcut_url', trimmed)
+      setIsEditingUrl(false)
+    }
+  }
 
   const isAndroidPlatform = useMemo(() => isAndroid() || hasAndroidBridge(), [])
   const isIOSPlatform = useMemo(() => isIOS(), [])
@@ -582,7 +596,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
               <div className="flex gap-2">
                 <a
-                  href={shortcutInstallUrl}
+                  href={customShortcutUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="py-3 px-3.5 rounded-2xl bg-violet-900/40 hover:bg-violet-900/60 border border-violet-400/40 text-violet-200 text-xs font-bold flex items-center justify-center gap-1.5 shrink-0 transition-all active:scale-98"
@@ -812,22 +826,54 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
               </p>
 
               <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-2">
-                <div className="font-bold text-white flex items-center gap-2">
-                  <Download size={14} className="text-violet-400" />
-                  <span>First time setup:</span>
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-white flex items-center gap-2">
+                    <Download size={14} className="text-violet-400" />
+                    <span>Step 1: Install Shortcut on iPhone</span>
+                  </div>
+                  <button
+                    onClick={() => setIsEditingUrl(!isEditingUrl)}
+                    className="text-[11px] text-violet-300 hover:text-white underline cursor-pointer"
+                  >
+                    {isEditingUrl ? 'Cancel' : 'Paste Shortcut Link'}
+                  </button>
                 </div>
-                <p className="text-[11px] text-gray-300">
-                  Tap below to add the &ldquo;PhotoRouletteUpload&rdquo; shortcut to your Apple Shortcuts app.
-                </p>
-                <a
-                  href={shortcutInstallUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-2.5 px-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold flex items-center justify-center gap-2 transition-all shadow-md active:scale-98 text-center text-xs"
-                >
-                  <Download size={15} />
-                  <span>📥 Download / Import Shortcut to iPhone</span>
-                </a>
+
+                {isEditingUrl ? (
+                  <div className="space-y-2 pt-1">
+                    <input
+                      type="text"
+                      value={inputUrl}
+                      onChange={(e) => setInputUrl(e.target.value)}
+                      placeholder="https://www.icloud.com/shortcuts/..."
+                      className="w-full px-3 py-2 text-xs bg-black/50 border border-violet-500/40 rounded-lg text-white placeholder-gray-500 outline-none focus:border-violet-400"
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      fullWidth
+                      onClick={handleSaveUrl}
+                      className="text-xs font-bold"
+                    >
+                      Save Predefined Shortcut Link
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-gray-300">
+                      Tap below to add the pre-built &ldquo;PhotoRouletteUpload&rdquo; shortcut to your Apple Shortcuts library.
+                    </p>
+                    <a
+                      href={customShortcutUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2.5 px-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold flex items-center justify-center gap-2 transition-all shadow-md active:scale-98 text-center text-xs"
+                    >
+                      <Download size={15} />
+                      <span>📥 Install Predefined Shortcut to iPhone</span>
+                    </a>
+                  </>
+                )}
               </div>
 
               <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1 font-mono text-[11px] text-gray-400">
