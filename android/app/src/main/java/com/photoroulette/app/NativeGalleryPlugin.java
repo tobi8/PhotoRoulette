@@ -82,6 +82,31 @@ public class NativeGalleryPlugin extends Plugin {
         processRandom20(call);
     }
 
+    @PluginMethod
+    public void checkGalleryPermission(PluginCall call) {
+        JSObject res = new JSObject();
+        res.put("granted", hasRequiredPermissions());
+        call.resolve(res);
+    }
+
+    @PluginMethod
+    public void requestGalleryPermission(PluginCall call) {
+        if (hasRequiredPermissions()) {
+            JSObject res = new JSObject();
+            res.put("granted", true);
+            call.resolve(res);
+            return;
+        }
+        requestAllPermissions(call, "permissionCallbackDirectRequest");
+    }
+
+    @PermissionCallback
+    private void permissionCallbackDirectRequest(PluginCall call) {
+        JSObject res = new JSObject();
+        res.put("granted", hasRequiredPermissions());
+        call.resolve(res);
+    }
+
     @PermissionCallback
     private void permissionCallbackGetMedias(PluginCall call) {
         if (hasRequiredPermissions()) {
@@ -102,10 +127,17 @@ public class NativeGalleryPlugin extends Plugin {
 
     @Override
     public boolean hasRequiredPermissions() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            return getPermissionState("images") == PermissionState.GRANTED;
+        if (Build.VERSION.SDK_INT >= 34) {
+            boolean hasImages = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            boolean hasVideos = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            boolean hasPartial = getContext().checkSelfPermission("android.permission.READ_MEDIA_VISUAL_USER_SELECTED") == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            return hasImages || hasVideos || hasPartial;
+        } else if (Build.VERSION.SDK_INT >= 33) {
+            boolean hasImages = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            boolean hasVideos = getContext().checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            return hasImages || hasVideos;
         } else {
-            return getPermissionState("storage") == PermissionState.GRANTED;
+            return getContext().checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED;
         }
     }
 
@@ -290,9 +322,8 @@ public class NativeGalleryPlugin extends Plugin {
             try {
                 String roomId = call.getString("room", "ROOM");
                 String userId = call.getString("userId", "user");
-                String uploadUrl = call.getString("uploadUrl", "");
-
-                List<MediaRef> allRefs = queryAllMediaReferences("all");
+                String types = call.getString("types", "all");
+                List<MediaRef> allRefs = queryAllMediaReferences(types);
                 int count = Math.min(20, allRefs.size());
 
                 if (uploadUrl != null && !uploadUrl.trim().isEmpty()) {
@@ -345,6 +376,11 @@ public class NativeGalleryPlugin extends Plugin {
             conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
 
             DataOutputStream dos = new DataOutputStream(conn.getOutputStream());
+
+            dos.writeBytes("--" + boundary + "\r\n");
+            dos.writeBytes("Content-Disposition: form-data; name=\"room\"\r\n\r\n" + roomId + "\r\n");
+            dos.writeBytes("--" + boundary + "\r\n");
+            dos.writeBytes("Content-Disposition: form-data; name=\"userId\"\r\n\r\n" + userId + "\r\n");
 
             for (int i = 0; i < list.size(); i++) {
                 MediaRef ref = list.get(i);

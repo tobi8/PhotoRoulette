@@ -16,8 +16,10 @@ import { Badge } from "../ui/Badge"
 import { ImagePreviewModal } from "../ml/ImagePreviewModal"
 import { useDocumentFilter } from "../../hooks/useDocumentFilter"
 import {
+  isAndroid,
   hasAndroidBridge,
   pickRandom20Android,
+  requestAndroidGalleryPermission,
 } from "../../services/nativeMediaService"
 import { getOrCreateDeviceId } from "../../utils/deviceId"
 
@@ -61,6 +63,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [isPreparing, setIsPreparing] = useState(false)
   const [isWaitingForShortcut, setIsWaitingForShortcut] = useState(false)
+  const [permissionDenied, setPermissionDenied] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const pollingRef = useRef<any>(null)
 
@@ -68,7 +71,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
     return getOrCreateDeviceId()
   }, [])
 
-  const isAndroidNative = useMemo(() => hasAndroidBridge(), [])
+  const isAndroidDevice = useMemo(() => isAndroid(), [])
   const activeShortcut = SHORTCUT_LINKS[mediaType] || SHORTCUT_LINKS.mixed
 
   const {
@@ -166,8 +169,23 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   const handleAndroidNativePick20 = async () => {
     setIsPreparing(true)
+    setPermissionDenied(false)
+    setStatusMessage("Requesting gallery access & picking 20 items...")
     try {
-      const assets = await pickRandom20Android(roomId, effectiveUserId, `${workerUrl}/upload`)
+      const granted = await requestAndroidGalleryPermission()
+      if (!granted) {
+        setPermissionDenied(true)
+        setStatusMessage("⚠️ Gallery permission needed to pick photos.")
+        setIsPreparing(false)
+        return
+      }
+
+      const assets = await pickRandom20Android(
+        roomId,
+        effectiveUserId,
+        `${workerUrl}/upload`,
+        mediaType
+      )
       if (assets && assets.length > 0) {
         const mapped = assets.map((a, idx) => ({
           id: a.id || String(idx),
@@ -176,18 +194,29 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         }))
         loadExistingMedia(mapped)
         onMediaReady(mapped)
+        try {
+          sessionStorage.setItem(`pr_media_${roomId}_${effectiveUserId}`, JSON.stringify(mapped))
+        } catch {}
         if (!isReady) {
           onToggleReady()
         }
         setStatusMessage("🎉 20 items picked from Android device!")
       } else {
-        setStatusMessage("No media returned or gallery permission required.")
+        const found = await checkWorkerMedia()
+        if (found) {
+          setStatusMessage("🎉 20 items loaded!")
+        } else {
+          setPermissionDenied(true)
+          setStatusMessage("No media returned or gallery permission required.")
+        }
       }
-    } catch {
-      setStatusMessage("Failed to access Android MediaStore.")
+    } catch (e: any) {
+      console.error("Android media pick error:", e)
+      setPermissionDenied(true)
+      setStatusMessage("Failed to access Android gallery.")
     } finally {
       setIsPreparing(false)
-      setTimeout(() => setStatusMessage(null), 4000)
+      setTimeout(() => setStatusMessage(null), 5000)
     }
   }
 
@@ -248,13 +277,15 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       <div className="flex items-center justify-between pb-2 border-b border-white/10">
         <div>
           <h3 className="font-bold text-white text-base flex items-center gap-2">
-            <span>{activeShortcut.label} Media Setup</span>
+            <span>{isAndroidDevice ? "Device Gallery" : activeShortcut.label} Media Setup</span>
             <span className="text-xl">
               {mediaType === "videos_only" ? "🎥" : mediaType === "photos_only" ? "📸" : "✨"}
             </span>
           </h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            Auto-pick 20 random items via iOS Shortcut
+            {isAndroidDevice
+              ? "Auto-pick 20 random items from your gallery"
+              : "Auto-pick 20 random items via iOS Shortcut"}
           </p>
         </div>
 
@@ -273,7 +304,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </div>
             <div>
               <div className="text-sm font-bold text-white">Preparing random media...</div>
-              <div className="text-xs text-gray-400">Loading 20 random items silently...</div>
+              <div className="text-xs text-gray-400">Loading 20 random items from gallery...</div>
             </div>
           </div>
         </div>
@@ -286,7 +317,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
         </div>
       )}
 
-      {isWaitingForShortcut && (
+      {!isAndroidDevice && isWaitingForShortcut && (
         <div className="p-3.5 rounded-2xl bg-blue-950/60 border border-blue-500/40 flex items-center gap-2.5 text-xs text-blue-200 animate-pulse shadow-lg">
           <RotateCw size={16} className="animate-spin text-blue-400 shrink-0" />
           <div className="flex-1">
@@ -300,74 +331,101 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
       {items.length === 0 ? (
         <div className="space-y-3">
-          {/* Button 1: Automatically triggers shortcut */}
-          <button
-            type="button"
-            onClick={handleIOSShortcutTrigger}
-            className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-blue-950/40 active:scale-98 text-left"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                <Send size={22} />
-              </div>
-              <div>
-                <div className="font-extrabold text-white text-base">
-                  📲 Import 20 via iOS Shortcut
+          {isAndroidDevice ? (
+            <>
+              {permissionDenied && (
+                <div className="p-3.5 rounded-2xl bg-amber-950/60 border border-amber-500/40 text-xs text-amber-200 flex items-center justify-between gap-3 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={18} className="text-amber-400 shrink-0" />
+                    <span>Gallery permission is required to access your photos.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAndroidNativePick20}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-lg text-xs transition-colors shrink-0 cursor-pointer"
+                  >
+                    Grant Access
+                  </button>
                 </div>
-                <div className="text-xs text-blue-200/90 font-normal mt-0.5">
-                  Auto-picks 20 random {activeShortcut.label.toLowerCase()} on iPhone
-                </div>
-              </div>
-            </div>
-            <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-bold shrink-0">
-              Run
-            </span>
-          </button>
+              )}
 
-          {/* Button 2: Installs shortcut */}
-          <a
-            href={activeShortcut.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full p-3.5 rounded-2xl bg-violet-950/40 hover:bg-violet-900/50 border border-violet-500/30 text-violet-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98 shadow-md cursor-pointer"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-violet-600/25 border border-violet-400/30 flex items-center justify-center text-violet-300 shrink-0">
-                <Download size={18} />
-              </div>
-              <div>
-                <div className="font-bold text-white text-sm">📥 Install Apple Shortcut</div>
-                <div className="text-[11px] text-violet-300/70 font-normal mt-0.5">
-                  Add &ldquo;{activeShortcut.name}&rdquo; to your Shortcuts
-                </div>
-              </div>
-            </div>
-            <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold shrink-0">
-              {activeShortcut.label}
-            </span>
-          </a>
-
-          {isAndroidNative && (
-            <button
-              type="button"
-              onClick={handleAndroidNativePick20}
-              className="w-full p-3.5 rounded-2xl bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98 shadow-md cursor-pointer text-left"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-emerald-600/25 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shrink-0">
-                  <Smartphone size={18} />
-                </div>
-                <div>
-                  <div className="font-bold text-white text-sm">⚡ Pick Random 20 (Android Native)</div>
-                  <div className="text-[11px] text-emerald-300/70 font-normal mt-0.5">
-                    Direct silent pick from device storage
+              <button
+                type="button"
+                onClick={handleAndroidNativePick20}
+                disabled={isPreparing}
+                className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-violet-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-emerald-950/40 active:scale-98 text-left disabled:opacity-50"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                    <Smartphone size={24} />
+                  </div>
+                  <div>
+                    <div className="font-extrabold text-white text-base">
+                      {mediaType === "videos_only"
+                        ? "⚡ Pick 20 Random Videos"
+                        : mediaType === "photos_only"
+                        ? "⚡ Pick 20 Random Photos"
+                        : "⚡ Pick 20 Random Items"}
+                    </div>
+                    <div className="text-xs text-emerald-200/90 font-normal mt-0.5">
+                      Direct 1-tap random pick from device gallery
+                    </div>
                   </div>
                 </div>
-              </div>
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-full font-bold shrink-0">
-                Android
-              </span>
-            </button>
+                <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
+                  Pick 20
+                </span>
+              </button>
+            </>
+          ) : (
+            <>
+              {/* Button 1: Automatically triggers shortcut */}
+              <button
+                type="button"
+                onClick={handleIOSShortcutTrigger}
+                className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 border border-blue-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-blue-950/40 active:scale-98 text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                    <Send size={22} />
+                  </div>
+                  <div>
+                    <div className="font-extrabold text-white text-base">
+                      📲 Import 20 via iOS Shortcut
+                    </div>
+                    <div className="text-xs text-blue-200/90 font-normal mt-0.5">
+                      Auto-picks 20 random {activeShortcut.label.toLowerCase()} on iPhone
+                    </div>
+                  </div>
+                </div>
+                <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-bold shrink-0">
+                  Run
+                </span>
+              </button>
+
+              {/* Button 2: Installs shortcut */}
+              <a
+                href={activeShortcut.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full p-3.5 rounded-2xl bg-violet-950/40 hover:bg-violet-900/50 border border-violet-500/30 text-violet-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98 shadow-md cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-violet-600/25 border border-violet-400/30 flex items-center justify-center text-violet-300 shrink-0">
+                    <Download size={18} />
+                  </div>
+                  <div>
+                    <div className="font-bold text-white text-sm">📥 Install Apple Shortcut</div>
+                    <div className="text-[11px] text-violet-300/70 font-normal mt-0.5">
+                      Add &ldquo;{activeShortcut.name}&rdquo; to your Shortcuts
+                    </div>
+                  </div>
+                </div>
+                <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold shrink-0">
+                  {activeShortcut.label}
+                </span>
+              </a>
+            </>
           )}
         </div>
       ) : (
@@ -435,7 +493,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             </Button>
 
             <div className="flex gap-2">
-              {isAndroidNative ? (
+              {isAndroidDevice ? (
                 <Button
                   variant="outline"
                   size="sm"

@@ -21,6 +21,7 @@ interface NativeGalleryPlugin {
     room?: string
     userId?: string
     uploadUrl?: string
+    types?: 'photos' | 'videos' | 'all'
   }): Promise<{
     medias?: Array<{
       identifier: string
@@ -30,6 +31,8 @@ interface NativeGalleryPlugin {
     success?: boolean
     response?: string
   }>
+  checkGalleryPermission(): Promise<{ granted: boolean }>
+  requestGalleryPermission(): Promise<{ granted: boolean }>
 }
 
 const AndroidGallery = registerPlugin<NativeGalleryPlugin>('NativeGallery')
@@ -50,6 +53,14 @@ export function isNativeApp(): boolean {
 }
 
 export function isAndroid(): boolean {
+  return (
+    Capacitor.getPlatform() === 'android' ||
+    typeof window.AndroidBridge !== 'undefined' ||
+    (typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent))
+  )
+}
+
+export function isAndroidApp(): boolean {
   return Capacitor.getPlatform() === 'android' || typeof window.AndroidBridge !== 'undefined'
 }
 
@@ -61,17 +72,55 @@ export function hasAndroidBridge(): boolean {
   return typeof window.AndroidBridge !== 'undefined' || Capacitor.isPluginAvailable('NativeGallery')
 }
 
+export async function checkAndroidGalleryPermission(): Promise<boolean> {
+  try {
+    if (Capacitor.isPluginAvailable('NativeGallery')) {
+      const res = await AndroidGallery.checkGalleryPermission()
+      return !!res.granted
+    }
+  } catch {}
+  return true
+}
+
+export async function requestAndroidGalleryPermission(): Promise<boolean> {
+  try {
+    if (Capacitor.isPluginAvailable('NativeGallery')) {
+      const res = await AndroidGallery.requestGalleryPermission()
+      return !!res.granted
+    }
+  } catch {}
+  return true
+}
+
 export async function pickRandom20Android(
   roomId: string,
   userId: string,
-  uploadUrl?: string
+  uploadUrl?: string,
+  mediaType: 'photos_only' | 'videos_only' | 'mixed' = 'mixed'
 ): Promise<NativeMediaAsset[]> {
+  const types = mediaType === 'videos_only' ? 'videos' : mediaType === 'photos_only' ? 'photos' : 'all'
   try {
     const result = await AndroidGallery.pickRandom20({
       room: roomId,
       userId: userId,
       uploadUrl: uploadUrl || '',
+      types,
     })
+
+    if (result && result.response) {
+      try {
+        const parsed = JSON.parse(result.response)
+        if (parsed.items && Array.isArray(parsed.items) && parsed.items.length > 0) {
+          return parsed.items.map((item: any) => ({
+            id: item.id || `android-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            dataUrl: item.url,
+            type: item.type === 'video' ? 'video' : 'image',
+          }))
+        }
+      } catch (e) {
+        console.warn('Failed parsing Android upload response JSON:', e)
+      }
+    }
 
     if (result && result.medias && result.medias.length > 0) {
       return result.medias.map((item) => ({
