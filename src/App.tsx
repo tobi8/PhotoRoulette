@@ -534,18 +534,18 @@ export default function App() {
   // --------------------------------------------------------------------------
   const startHostGame = async () => {
     const trimmed = inputName.trim()
-    if (trimmed) {
-      try {
-        localStorage.setItem('photo_roulette_username', trimmed)
-      } catch {}
-    }
+    if (!trimmed) return
+
+    try {
+      localStorage.setItem('photo_roulette_username', trimmed)
+    } catch {}
 
     const code = generateRoomCode()
     const { peerId: generatedPeerId } = await peerConnection.createRoom(code)
 
     const hostPlayer: Player = {
       id: generatedPeerId,
-      name: trimmed || 'Host',
+      name: trimmed,
       avatar: selectedAvatar,
       color: selectedColor,
       isHost: true,
@@ -576,18 +576,18 @@ export default function App() {
     if (!inputRoomCode.trim()) return
 
     const trimmed = inputName.trim()
-    if (trimmed) {
-      try {
-        localStorage.setItem('photo_roulette_username', trimmed)
-      } catch {}
-    }
+    if (!trimmed) return
+
+    try {
+      localStorage.setItem('photo_roulette_username', trimmed)
+    } catch {}
 
     const formattedCode = formatRoomCode(inputRoomCode)
     const { peerId: generatedPeerId } = await peerConnection.joinRoom(formattedCode)
 
     const clientPlayer: Player = {
       id: generatedPeerId,
-      name: trimmed || `Player ${Math.floor(Math.random() * 900 + 100)}`,
+      name: trimmed,
       avatar: selectedAvatar,
       color: selectedColor,
       isHost: false,
@@ -1244,16 +1244,22 @@ export default function App() {
 
                 <div>
                   <label className="text-xs font-bold text-gray-300 uppercase tracking-wider block mb-1">
-                    Your Nickname
+                    Your Nickname <span className="text-pink-400">*</span>
                   </label>
                   <input
                     type="text"
                     maxLength={15}
-                    placeholder="Enter your name..."
+                    required
+                    placeholder="Enter your name (required)..."
                     value={inputName}
                     onChange={(e) => setInputName(e.target.value)}
                     className="w-full px-4 py-3 rounded-xl bg-black/40 border border-white/20 text-white text-sm font-semibold focus:outline-none focus:border-violet-500"
                   />
+                  {!inputName.trim() && (
+                    <span className="text-[10px] text-pink-400 font-medium block mt-1">
+                      Nickname is required to continue
+                    </span>
+                  )}
                 </div>
 
                 {/* Avatar emoji picker */}
@@ -1320,6 +1326,10 @@ export default function App() {
                     size="md"
                     className="flex-2"
                     isLoading={peerConnection.isConnecting}
+                    disabled={
+                      !inputName.trim() ||
+                      (landingMode === 'JOIN_SETUP' && !inputRoomCode.trim())
+                    }
                     onClick={landingMode === 'HOST_SETUP' ? startHostGame : joinExistingGame}
                   >
                     <span>{landingMode === 'HOST_SETUP' ? 'Launch Room 🚀' : 'Join 🎮'}</span>
