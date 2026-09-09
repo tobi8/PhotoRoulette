@@ -1,5 +1,4 @@
 import { MediaItem, Player } from '../types/game'
-import { getMockPartyPhotos, getMockPartyVideos, getMockPartyDeck } from './mockData'
 
 export function fisherYatesShuffle<T>(arr: T[]): T[] {
   const result = [...arr]
@@ -57,21 +56,7 @@ export function buildBalancedRouletteDeck(
   })
 
   if (eligibleDeck.length === 0) {
-    const mockSource =
-      mediaType === 'videos_only'
-        ? getMockPartyVideos()
-        : mediaType === 'mixed'
-        ? getMockPartyDeck('mixed')
-        : getMockPartyPhotos()
-
-    return mockSource.slice(0, totalRoundsRequested).map((p, idx) => {
-      const assignedPlayer = players[idx % (players.length || 1)]
-      return {
-        ...p,
-        ownerId: assignedPlayer?.id || 'host',
-        ownerName: assignedPlayer?.name || 'Player',
-      }
-    })
+    return []
   }
 
   const playerMediaMap = new Map<string, MediaItem[]>()

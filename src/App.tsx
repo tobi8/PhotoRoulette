@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Users,
   Sparkles,
   Zap,
   ArrowRight,
   Crown,
+  Tv,
 } from 'lucide-react'
 import {
   ActiveRoundState,
@@ -108,6 +109,15 @@ export default function App() {
   const [players, setPlayers] = useState<Player[]>([])
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null)
   const [countdownNum, setCountdownNum] = useState<number>(3)
+
+  const activePlayers = useMemo(
+    () => (settings.tvMode ? players.filter((p) => !p.isHost) : players),
+    [players, settings.tvMode]
+  )
+  const allPlayersHavePhotos = useMemo(
+    () => activePlayers.length > 0 && activePlayers.every((p) => (p.mediaCount || 0) > 0),
+    [activePlayers]
+  )
 
  
   const [isReady, setIsReady] = useState<boolean>(false)
@@ -742,11 +752,28 @@ export default function App() {
  
   const handleUpdateSettings = (newSettings: GameSettings) => {
     setSettings(newSettings)
+    if (newSettings.tvMode && currentPlayer?.isHost) {
+      playerSubmissionsRef.current.delete(currentPlayer.id)
+      mediaDeckRef.current = buildAggregatedPool(playerSubmissionsRef.current)
+      setPlayers((prev) => {
+        const updated = prev.map((p) => (p.isHost ? { ...p, mediaCount: 0 } : p))
+        peerConnection.broadcast({
+          type: 'STATE_SYNC',
+          senderId: peerConnection.peerId,
+          payload: { settings: newSettings, players: updated },
+        })
+        saveGameSession({ settings: newSettings, players: updated })
+        return updated
+      })
+      return
+    }
+
     peerConnection.broadcast({
       type: 'STATE_SYNC',
       senderId: peerConnection.peerId,
       payload: { settings: newSettings, players },
     })
+    saveGameSession({ settings: newSettings })
   }
 
   const handleMediaContribute = useCallback(
@@ -935,7 +962,10 @@ export default function App() {
         runNextRound(nextRoundNumber, stateRef.current.players)
       },
       onGameOver: () => {
-        const awards = calculateAwards(stateRef.current.players, roundHistoryRef.current)
+        const scoringPlayers = stateRef.current.settings.tvMode
+          ? stateRef.current.players.filter((p) => !p.isHost)
+          : stateRef.current.players
+        const awards = calculateAwards(scoringPlayers, roundHistoryRef.current)
         setGameAwards(awards)
         setPhase('GAME_OVER')
         playVictory()
@@ -956,12 +986,16 @@ export default function App() {
         ? playerSubmissionsRef.current
         : mediaDeckRef.current
 
+    const gamePlayers = settings.tvMode ? players.filter((p) => !p.isHost) : players
+
     const currentDeck = buildBalancedRouletteDeck(
       poolSource,
-      players,
+      gamePlayers,
       settings.mediaType,
       settings.totalRounds || 10
     )
+
+    if (currentDeck.length === 0) return
 
     mediaDeckRef.current = currentDeck
 
@@ -994,7 +1028,10 @@ export default function App() {
     const totalRounds = Math.min(settings.totalRounds, mediaDeckRef.current.length)
 
     if (roundNum > totalRounds || currentRoundIndexRef.current >= mediaDeckRef.current.length) {
-      const awards = calculateAwards(currentPlayersList, roundHistoryRef.current)
+      const scoringPlayers = settings.tvMode
+        ? currentPlayersList.filter((p) => !p.isHost)
+        : currentPlayersList
+      const awards = calculateAwards(scoringPlayers, roundHistoryRef.current)
       setGameAwards(awards)
       setPhase('GAME_OVER')
       playVictory()
@@ -1493,39 +1530,54 @@ export default function App() {
 
               {}
               <div className="md:col-span-7 space-y-4">
-                <MediaUploader
-                  onMediaReady={handleMediaContribute}
-                  isReady={isReady}
-                  onToggleReady={handleToggleReady}
-                  mediaType={settings.mediaType}
-                  roomId={peerConnection.roomCode || 'ROOM'}
-                  userId={currentPlayer?.id || peerConnection.peerId}
-                />
+                {(!settings.tvMode || !currentPlayer?.isHost) ? (
+                  <MediaUploader
+                    onMediaReady={handleMediaContribute}
+                    isReady={isReady}
+                    onToggleReady={handleToggleReady}
+                    mediaType={settings.mediaType}
+                    roomId={peerConnection.roomCode || 'ROOM'}
+                    userId={currentPlayer?.id || peerConnection.peerId}
+                  />
+                ) : (
+                  <div className="p-4 sm:p-5 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 text-center space-y-2 animate-in fade-in duration-200">
+                    <div className="inline-flex p-2.5 rounded-full bg-indigo-500/20 text-indigo-300">
+                      <Tv size={24} />
+                    </div>
+                    <div className="font-bold text-white text-base">
+                      Host TV Screen Mode Active
+                    </div>
+                    <p className="text-xs text-indigo-200/70 max-w-sm mx-auto">
+                      This screen acts purely as the party display and TV scoreboard. Join on your mobile devices using the room code or QR code to select photos and play!
+                    </p>
+                  </div>
+                )}
 
-                {}
                 <PlayerList
-                  players={players}
+                  players={activePlayers}
                   currentPlayerId={currentPlayer?.id}
                   isHost={!!currentPlayer?.isHost}
                   onRemovePlayer={handleRemovePlayer}
                 />
 
-                {}
                 {currentPlayer?.isHost && (
                   <div className="space-y-2 pt-2">
-
                     <Button
                       size="xl"
                       variant="primary"
                       fullWidth
-                      disabled={players.length < 1}
+                      disabled={!allPlayersHavePhotos}
                       onClick={startFullGame}
                       className="text-base font-black shadow-violet-900/50 tracking-wider"
                     >
                       <span>START</span>
                     </Button>
                     <p className="text-[11px] text-gray-400 text-center">
-                      Rounds, owner reveals and scoreboards will automatically transition every 3 seconds hands-free!
+                      {activePlayers.length === 0
+                        ? 'Waiting for players to join...'
+                        : !allPlayersHavePhotos
+                        ? `Waiting for all players to select photos (${activePlayers.filter((p) => (p.mediaCount || 0) > 0).length}/${activePlayers.length} ready)...`
+                        : 'All players have selected photos! Press START to begin.'}
                     </p>
                   </div>
                 )}
@@ -1561,7 +1613,7 @@ export default function App() {
                 Round {activeRound.roundNumber} of {activeRound.totalRounds}
               </span>
               <span className="font-semibold text-gray-400">
-                {players.length} players in game
+                {activePlayers.length} players in game
               </span>
             </div>
 
@@ -1583,7 +1635,7 @@ export default function App() {
 
             {(!settings.tvMode || !currentPlayer?.isHost) && (
               <PlayerGrid
-                players={players}
+                players={activePlayers}
                 selectedPlayerId={activeRound.selectedPlayerId}
                 hasAnswered={activeRound.hasAnswered}
                 onSelectPlayer={handleAnswerSubmit}
@@ -1606,7 +1658,7 @@ export default function App() {
                   : undefined)
               }
               correctOwnerName={activeRound.correctOwnerName}
-              players={players}
+              players={activePlayers}
               results={activeRound.results}
               currentPlayerId={currentPlayer?.id}
               isHostTV={settings.tvMode && currentPlayer?.isHost}
@@ -1621,7 +1673,7 @@ export default function App() {
         {phase === 'LEADERBOARD' && (
           <div className="w-full max-w-lg mx-auto space-y-4 py-4 animate-in fade-in duration-200">
             <LeaderboardRace
-              players={players}
+              players={activePlayers}
               currentPlayerId={currentPlayer?.id}
               roundNumber={activeRound.roundNumber}
               totalRounds={activeRound.totalRounds}
@@ -1636,7 +1688,7 @@ export default function App() {
         {phase === 'GAME_OVER' && (
           <div className="w-full py-4 animate-in fade-in duration-300">
             <Podium
-              players={players}
+              players={activePlayers}
               awards={gameAwards}
               onPlayAgain={handlePlayAgain}
               isHost={!!currentPlayer?.isHost}

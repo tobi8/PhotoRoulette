@@ -163,7 +163,25 @@ assert.strictEqual(mapOwnerCounts['host'], 5, 'Host should have exactly 5 rounds
 assert.strictEqual(mapOwnerCounts['guest'], 5, 'Guest should have exactly 5 rounds in balanced 2-player deck')
 console.log('✅ Multi-player Map submission aggregation & balanced deck passed')
 
-console.log('🎉 All automated tests passed successfully!')
+const emptyDeckResult = buildBalancedRouletteDeck([], testPlayersList, 'photos_only', 10)
+assert.strictEqual(emptyDeckResult.length, 0, 'Deck should be empty when no photos uploaded and no placeholder photos returned')
+
+const tvHost = { id: 'host', name: 'Host', isHost: true, mediaCount: 0 }
+const guest1 = { id: 'g1', name: 'Guest 1', isHost: false, mediaCount: 5 }
+const guest2 = { id: 'g2', name: 'Guest 2', isHost: false, mediaCount: 0 }
+const lobbyPlayers = [tvHost, guest1, guest2]
+
+const tvActive = lobbyPlayers.filter((p) => !p.isHost)
+assert.strictEqual(tvActive.length, 2, 'TV mode active players should exclude host')
+assert.strictEqual(tvActive.some((p) => p.isHost), false, 'Host must not appear in active players list')
+
+const canStartBeforeGuest2 = tvActive.length > 0 && tvActive.every((p) => (p.mediaCount || 0) > 0)
+assert.strictEqual(canStartBeforeGuest2, false, 'Host cannot start when guest2 has not selected photos')
+
+guest2.mediaCount = 10
+const canStartAfterGuest2 = tvActive.length > 0 && tvActive.every((p) => (p.mediaCount || 0) > 0)
+assert.strictEqual(canStartAfterGuest2, true, 'Host can start once all active players have selected photos')
+console.log('✅ Placeholder photos removal & TV mode readiness validation passed')
 
 import { HostRoundController } from './src/utils/hostRoundController.ts'
 import { clockSync } from './src/utils/clockSync.ts'
