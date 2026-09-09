@@ -10,6 +10,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.media.ExifInterface;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.MediaStore;
@@ -68,11 +69,13 @@ public class NativeGalleryPlugin extends Plugin {
         Uri uri;
         boolean isVideo;
         long id;
+        long dateTaken;
 
-        MediaRef(Uri uri, boolean isVideo, long id) {
+        MediaRef(Uri uri, boolean isVideo, long id, long dateTaken) {
             this.uri = uri;
             this.isVideo = isVideo;
             this.id = id;
+            this.dateTaken = dateTaken;
         }
     }
 
@@ -169,60 +172,98 @@ public class NativeGalleryPlugin extends Plugin {
         }
     }
 
-    private List<MediaRef> queryStratifiedMedia(String types, int targetCount) {
-        List<MediaRef> selectedRefs = new ArrayList<>(targetCount);
+    private List<MediaRef> queryTrueShuffledMedia(String types, int targetCount) {
+        List<MediaRef> allCandidates = new ArrayList<>();
         ContentResolver resolver = getContext().getContentResolver();
-        Random rng = new Random();
 
-        Uri collection = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-            ? MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-            : MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+        boolean includeImages = !"videos".equalsIgnoreCase(types);
+        boolean includeVideos = !"photos".equalsIgnoreCase(types);
 
-        String[] projection = {
-            MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DATE_TAKEN
-        };
-        String sortOrder = MediaStore.Images.Media.DATE_TAKEN + " DESC";
-
-        try (Cursor cursor = resolver.query(collection, projection, null, null, sortOrder)) {
-            if (cursor != null && cursor.getCount() > 0) {
-                int totalRows = cursor.getCount();
-                int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
-                int countToTake = Math.min(targetCount, totalRows);
-
-                if (totalRows <= countToTake) {
+        if (includeImages) {
+            Uri imageCollection = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                ? MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                : MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+            String[] projection = {
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DATE_TAKEN
+            };
+            try (Cursor cursor = resolver.query(imageCollection, projection, null, null, null)) {
+                if (cursor != null) {
+                    int idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
+                    int dateCol = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN);
                     while (cursor.moveToNext()) {
-                        long id = cursor.getLong(idColumn);
-                        selectedRefs.add(new MediaRef(ContentUris.withAppendedId(collection, id), false, id));
+                        long id = cursor.getLong(idCol);
+                        long date = dateCol != -1 ? cursor.getLong(dateCol) : 0L;
+                        allCandidates.add(new MediaRef(ContentUris.withAppendedId(imageCollection, id), false, id, date));
                     }
-                } else {
-                    double stride = (double) totalRows / (double) countToTake;
-                    Set<Integer> visited = new HashSet<>();
+                }
+            } catch (Exception ignored) {}
+        }
 
-                    for (int i = 0; i < countToTake; i++) {
-                        int minPos = (int) (i * stride);
-                        int maxPos = Math.min(totalRows - 1, (int) (((i + 1) * stride) - 1));
-                        int picked = maxPos > minPos ? minPos + rng.nextInt(maxPos - minPos + 1) : minPos;
+        if (includeVideos) {
+            Uri videoCollection = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                ? MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                : MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+            String[] projection = {
+                MediaStore.Video.Media._ID,
+                MediaStore.Video.Media.DATE_TAKEN
+            };
+            try (Cursor cursor = resolver.query(videoCollection, projection, null, null, null)) {
+                if (cursor != null) {
+                    int idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
+                    int dateCol = cursor.getColumnIndex(MediaStore.Video.Media.DATE_TAKEN);
+                    while (cursor.moveToNext()) {
+                        long id = cursor.getLong(idCol);
+                        long date = dateCol != -1 ? cursor.getLong(dateCol) : 0L;
+                        allCandidates.add(new MediaRef(ContentUris.withAppendedId(videoCollection, id), true, id, date));
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
 
-                        while (visited.contains(picked) && picked < totalRows - 1) {
-                            picked++;
-                        }
-                        visited.add(picked);
+        if (allCandidates.isEmpty()) {
+            return Collections.emptyList();
+        }
 
-                        if (cursor.moveToPosition(picked)) {
-                            long id = cursor.getLong(idColumn);
-                            selectedRefs.add(new MediaRef(ContentUris.withAppendedId(collection, id), false, id));
-                        }
+        Collections.shuffle(allCandidates, new Random());
+
+        List<MediaRef> deduplicated = new ArrayList<>(targetCount);
+        List<MediaRef> skipped = new ArrayList<>();
+
+        for (MediaRef candidate : allCandidates) {
+            if (deduplicated.size() >= targetCount) {
+                break;
+            }
+            boolean isBurst = false;
+            if (candidate.dateTaken > 0) {
+                for (MediaRef picked : deduplicated) {
+                    if (picked.dateTaken > 0 && Math.abs(candidate.dateTaken - picked.dateTaken) < 30000L) {
+                        isBurst = true;
+                        break;
                     }
                 }
             }
-        } catch (Exception ignored) {}
+            if (!isBurst) {
+                deduplicated.add(candidate);
+            } else {
+                skipped.add(candidate);
+            }
+        }
 
-        Collections.shuffle(selectedRefs);
-        return selectedRefs;
+        if (deduplicated.size() < targetCount && !skipped.isEmpty()) {
+            for (MediaRef fallback : skipped) {
+                if (deduplicated.size() >= targetCount) {
+                    break;
+                }
+                deduplicated.add(fallback);
+            }
+        }
+
+        Collections.shuffle(deduplicated);
+        return deduplicated;
     }
 
-    private byte[] decodeAndCompressThumbnail(Uri uri) {
+    private byte[] decodeAndCompressThumbnail(Uri uri, boolean isVideo) {
         ContentResolver resolver = getContext().getContentResolver();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -239,6 +280,30 @@ public class NativeGalleryPlugin extends Plugin {
                     return stream.toByteArray();
                 }
             } catch (Exception ignored) {}
+        }
+
+        if (isVideo) {
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            try {
+                retriever.setDataSource(getContext(), uri);
+                Bitmap frame = retriever.getFrameAtTime();
+                if (frame != null) {
+                    Bitmap scaled = scaleBitmapWithinBox(frame, TARGET_BOUNDING_BOX);
+                    ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                    scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, stream);
+                    if (scaled != frame) {
+                        scaled.recycle();
+                    }
+                    frame.recycle();
+                    return stream.toByteArray();
+                }
+            } catch (Exception ignored) {
+            } finally {
+                try {
+                    retriever.release();
+                } catch (Exception ignored) {}
+            }
+            return null;
         }
 
         InputStream is = null;
@@ -346,17 +411,17 @@ public class NativeGalleryPlugin extends Plugin {
         executor.execute(() -> {
             try {
                 String types = call.getString("types", "all");
-                List<MediaRef> refs = queryStratifiedMedia(types, 20);
+                List<MediaRef> refs = queryTrueShuffledMedia(types, 20);
                 List<Callable<JSObject>> tasks = new ArrayList<>(refs.size());
 
                 for (MediaRef ref : refs) {
                     tasks.add(() -> {
-                        byte[] bytes = decodeAndCompressThumbnail(ref.uri);
+                        byte[] bytes = decodeAndCompressThumbnail(ref.uri, ref.isVideo);
                         if (bytes == null || bytes.length == 0) return null;
                         String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
                         JSObject item = new JSObject();
                         item.put("identifier", String.valueOf(ref.id));
-                        item.put("type", "image");
+                        item.put("type", ref.isVideo ? "video" : "image");
                         item.put("data", "data:image/jpeg;base64," + base64);
                         return item;
                     });
