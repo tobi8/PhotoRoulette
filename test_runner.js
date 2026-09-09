@@ -173,10 +173,12 @@ let testPreloadSent = false
 let testStartSent = false
 let testStartPayload = null
 
+let testPreloadPayload = null
 let testCountdownStarted = false
 const testController = new HostRoundController({
   onPreloadBroadcast: (p) => {
     testPreloadSent = true
+    testPreloadPayload = p
   },
   onCountdownStart: (roundNum, total) => {
     testCountdownStarted = true
@@ -195,6 +197,7 @@ testController.initGame(hostDummyDeck, hostDummyPlayers, 5, 2, false)
 testController.startRound(1)
 assert.strictEqual(testPreloadSent, true, 'Preload payload should be dispatched in background')
 assert.strictEqual(testStartSent, false, 'Start should wait until countdown finish')
+assert.strictEqual(testPreloadPayload?.media?.ownerId, undefined, 'Preload payload must not expose ownerId')
 
 testController.handleClientPreloadAck(1, 'g1')
 assert.strictEqual(testCountdownStarted, true, 'Countdown should trigger once peers ack')
@@ -203,6 +206,67 @@ testController.transitionToActiveRound(1)
 assert.strictEqual(testController.getPhase(), 'ROUND_ACTIVE', 'Should enter ROUND_ACTIVE')
 assert.strictEqual(testStartSent, true, 'Round start dispatched with future endTime')
 assert.ok(testStartPayload.endTime > testStartPayload.startTime, 'endTime must be in future')
+assert.strictEqual(testStartPayload?.media?.ownerId, undefined, 'Start payload must not expose ownerId')
+
+const secret = testController.getCurrentSecret()
+assert.ok(secret, 'Authoritative secret must exist on host')
+assert.strictEqual(secret.correctOwnerId, 'h1', 'Authoritative ownerId must match actual item owner')
+assert.strictEqual(secret.correctOwnerName, 'Host', 'Authoritative ownerName must match actual item owner name')
 
 testController.cleanup()
 console.log('✅ Host-authoritative barrier architecture & clock skew unit tests passed')
+
+import { buildAggregatedPool } from './src/utils/deckBuilder.ts'
+
+const testSubmissions = new Map()
+testSubmissions.set('host', [
+  { id: 'h_1', type: 'image', dataUrl: 'data:image/jpeg;base64,h1', ownerId: 'host', ownerName: 'Host Player' },
+])
+testSubmissions.set('guest_1', [
+  { id: 'g_1', type: 'image', dataUrl: 'data:image/jpeg;base64,g1', ownerId: 'guest_1', ownerName: 'Guest 1' },
+])
+
+const aggregatedPool = buildAggregatedPool(testSubmissions)
+assert.strictEqual(aggregatedPool.length, 2, 'Aggregated pool should contain all contributed items')
+assert.strictEqual(aggregatedPool[0].ownerId, 'host', 'Host photo must retain host ownerId')
+assert.strictEqual(aggregatedPool[0].ownerName, 'Host Player', 'Host photo must retain host ownerName')
+assert.strictEqual(aggregatedPool[1].ownerId, 'guest_1', 'Guest photo must retain guest ownerId')
+assert.strictEqual(aggregatedPool[1].ownerName, 'Guest 1', 'Guest photo must retain guest ownerName')
+
+const createMediaSubmissionPacket = (player, dataUrls) => ({
+  type: 'MEDIA_SUBMISSION',
+  playerId: player.id,
+  playerName: player.name,
+  items: dataUrls,
+})
+
+const clientPacket = createMediaSubmissionPacket({ id: 'player_xyz', name: 'Zoe' }, ['data:image/jpeg;base64,xyz'])
+assert.strictEqual(clientPacket.type, 'MEDIA_SUBMISSION')
+assert.strictEqual(clientPacket.playerId, 'player_xyz')
+assert.strictEqual(clientPacket.playerName, 'Zoe')
+assert.strictEqual(clientPacket.items.length, 1)
+
+const createRoundResultPacket = (roundNum, ownerId, ownerName, playersList, answers) => {
+  const scores = {}
+  playersList.forEach((p) => {
+    scores[p.id] = p.score
+  })
+  return {
+    roundNumber: roundNum,
+    correctOwnerId: ownerId,
+    correctOwnerName: ownerName,
+    scores,
+    results: {
+      correctPlayerId: ownerId,
+      answers,
+    },
+  }
+}
+
+const revealPacket = createRoundResultPacket(1, 'guest_1', 'Guest 1', hostDummyPlayers, {})
+assert.strictEqual(revealPacket.correctOwnerId, 'guest_1', 'Reveal packet must contain verified ownerId')
+assert.strictEqual(revealPacket.correctOwnerName, 'Guest 1', 'Reveal packet must contain verified ownerName')
+assert.notStrictEqual(revealPacket.correctOwnerId, 'h1', 'Guest photo must never reveal host as owner')
+assert.notStrictEqual(revealPacket.correctOwnerName, 'Host', 'Guest photo must never display host name')
+
+console.log('✅ Structured media submission, deck aggregation, sanitized broadcast, and reveal attribution tests passed')

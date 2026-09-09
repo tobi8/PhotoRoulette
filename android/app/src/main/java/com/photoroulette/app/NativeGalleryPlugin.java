@@ -15,6 +15,7 @@ import android.os.Build;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Base64;
+import android.util.Size;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -28,7 +29,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 @CapacitorPlugin(
     name = "NativeGallery",
@@ -49,6 +57,12 @@ import java.util.List;
     }
 )
 public class NativeGalleryPlugin extends Plugin {
+
+    private static final int TARGET_BOUNDING_BOX = 600;
+    private static final int JPEG_QUALITY = 35;
+    private final ExecutorService executor = Executors.newFixedThreadPool(
+        Math.min(20, Math.max(4, Runtime.getRuntime().availableProcessors() * 2))
+    );
 
     private static class MediaRef {
         Uri uri;
@@ -155,56 +169,78 @@ public class NativeGalleryPlugin extends Plugin {
         }
     }
 
-    private List<MediaRef> queryAllMediaReferences(String types) {
-        List<MediaRef> allItems = new ArrayList<>();
+    private List<MediaRef> queryStratifiedMedia(String types, int targetCount) {
+        List<MediaRef> selectedRefs = new ArrayList<>(targetCount);
         ContentResolver resolver = getContext().getContentResolver();
+        Random rng = new Random();
 
-        if (!"videos".equalsIgnoreCase(types)) {
-            Uri[] imageUris = {
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                MediaStore.Images.Media.INTERNAL_CONTENT_URI
-            };
-            String[] projection = { MediaStore.Images.Media._ID };
-            for (Uri collection : imageUris) {
-                try (Cursor cursor = resolver.query(collection, projection, null, null, null)) {
-                    if (cursor != null) {
-                        int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
-                        while (cursor.moveToNext()) {
+        Uri collection = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+            ? MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            : MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+
+        String[] projection = {
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DATE_TAKEN
+        };
+        String sortOrder = MediaStore.Images.Media.DATE_TAKEN + " DESC";
+
+        try (Cursor cursor = resolver.query(collection, projection, null, null, sortOrder)) {
+            if (cursor != null && cursor.getCount() > 0) {
+                int totalRows = cursor.getCount();
+                int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
+                int countToTake = Math.min(targetCount, totalRows);
+
+                if (totalRows <= countToTake) {
+                    while (cursor.moveToNext()) {
+                        long id = cursor.getLong(idColumn);
+                        selectedRefs.add(new MediaRef(ContentUris.withAppendedId(collection, id), false, id));
+                    }
+                } else {
+                    double stride = (double) totalRows / (double) countToTake;
+                    Set<Integer> visited = new HashSet<>();
+
+                    for (int i = 0; i < countToTake; i++) {
+                        int minPos = (int) (i * stride);
+                        int maxPos = Math.min(totalRows - 1, (int) (((i + 1) * stride) - 1));
+                        int picked = maxPos > minPos ? minPos + rng.nextInt(maxPos - minPos + 1) : minPos;
+
+                        while (visited.contains(picked) && picked < totalRows - 1) {
+                            picked++;
+                        }
+                        visited.add(picked);
+
+                        if (cursor.moveToPosition(picked)) {
                             long id = cursor.getLong(idColumn);
-                            Uri contentUri = ContentUris.withAppendedId(collection, id);
-                            allItems.add(new MediaRef(contentUri, false, id));
+                            selectedRefs.add(new MediaRef(ContentUris.withAppendedId(collection, id), false, id));
                         }
                     }
-                } catch (Exception ignored) {}
+                }
             }
-        }
+        } catch (Exception ignored) {}
 
-        if (!"photos".equalsIgnoreCase(types)) {
-            Uri[] videoUris = {
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                MediaStore.Video.Media.INTERNAL_CONTENT_URI
-            };
-            String[] projection = { MediaStore.Video.Media._ID };
-            for (Uri collection : videoUris) {
-                try (Cursor cursor = resolver.query(collection, projection, null, null, null)) {
-                    if (cursor != null) {
-                        int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
-                        while (cursor.moveToNext()) {
-                            long id = cursor.getLong(idColumn);
-                            Uri contentUri = ContentUris.withAppendedId(collection, id);
-                            allItems.add(new MediaRef(contentUri, true, id));
-                        }
-                    }
-                } catch (Exception ignored) {}
-            }
-        }
-
-        Collections.shuffle(allItems);
-        return allItems;
+        Collections.shuffle(selectedRefs);
+        return selectedRefs;
     }
 
-    private byte[] compressImage(Uri uri, int maxDimension, int quality) {
+    private byte[] decodeAndCompressThumbnail(Uri uri) {
         ContentResolver resolver = getContext().getContentResolver();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                Bitmap thumb = resolver.loadThumbnail(uri, new Size(TARGET_BOUNDING_BOX, TARGET_BOUNDING_BOX), null);
+                if (thumb != null) {
+                    Bitmap scaled = scaleBitmapWithinBox(thumb, TARGET_BOUNDING_BOX);
+                    ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                    scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, stream);
+                    if (scaled != thumb) {
+                        scaled.recycle();
+                    }
+                    thumb.recycle();
+                    return stream.toByteArray();
+                }
+            } catch (Exception ignored) {}
+        }
+
         InputStream is = null;
         try {
             is = resolver.openInputStream(uri);
@@ -218,7 +254,7 @@ public class NativeGalleryPlugin extends Plugin {
             int sampleSize = 1;
             int width = boundsOpts.outWidth;
             int height = boundsOpts.outHeight;
-            while (width / 2 >= maxDimension || height / 2 >= maxDimension) {
+            while (width / 2 >= TARGET_BOUNDING_BOX && height / 2 >= TARGET_BOUNDING_BOX) {
                 width /= 2;
                 height /= 2;
                 sampleSize *= 2;
@@ -226,87 +262,116 @@ public class NativeGalleryPlugin extends Plugin {
 
             BitmapFactory.Options decodeOpts = new BitmapFactory.Options();
             decodeOpts.inSampleSize = sampleSize;
+            decodeOpts.inPreferredConfig = Bitmap.Config.RGB_565;
+
             is = resolver.openInputStream(uri);
             if (is == null) return null;
-            Bitmap bitmap = BitmapFactory.decodeStream(is, null, decodeOpts);
+            Bitmap rawBitmap = BitmapFactory.decodeStream(is, null, decodeOpts);
             is.close();
-            if (bitmap == null) return null;
+            if (rawBitmap == null) return null;
 
-            int currentWidth = bitmap.getWidth();
-            int currentHeight = bitmap.getHeight();
-            float scale = Math.min(1.0f, (float) maxDimension / Math.max(currentWidth, currentHeight));
+            Bitmap orientedBitmap = adjustOrientation(resolver, uri, rawBitmap);
+            Bitmap scaledBitmap = scaleBitmapWithinBox(orientedBitmap, TARGET_BOUNDING_BOX);
 
-            Matrix matrix = new Matrix();
-            if (scale < 1.0f) matrix.postScale(scale, scale);
+            ByteArrayOutputStream stream = new ByteArrayOutputStream();
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, stream);
 
-            Bitmap scaledBitmap = Bitmap.createBitmap(bitmap, 0, 0, currentWidth, currentHeight, matrix, true);
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, quality, baos);
-            if (scaledBitmap != bitmap) {
+            if (scaledBitmap != orientedBitmap) {
                 scaledBitmap.recycle();
             }
-            bitmap.recycle();
-            return baos.toByteArray();
+            if (orientedBitmap != rawBitmap) {
+                orientedBitmap.recycle();
+            }
+            rawBitmap.recycle();
+
+            return stream.toByteArray();
         } catch (Exception e) {
             return null;
         } finally {
             if (is != null) {
-                try { is.close(); } catch (Exception ignored) {}
+                try {
+                    is.close();
+                } catch (Exception ignored) {}
             }
         }
     }
 
-    private byte[] processVideo(Uri uri, int maxBytes) {
-        ContentResolver resolver = getContext().getContentResolver();
-        try (InputStream is = resolver.openInputStream(uri)) {
-            if (is == null) return null;
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            int n;
-            int total = 0;
-            while ((n = is.read(buf)) != -1) {
-                if (total + n > maxBytes) {
-                    baos.write(buf, 0, maxBytes - total);
-                    break;
-                }
-                baos.write(buf, 0, n);
-                total += n;
+    private Bitmap scaleBitmapWithinBox(Bitmap src, int maxDimension) {
+        int w = src.getWidth();
+        int h = src.getHeight();
+        int longest = Math.max(w, h);
+        if (longest <= maxDimension) return src;
+
+        float ratio = (float) maxDimension / (float) longest;
+        int targetW = Math.max(1, Math.round(w * ratio));
+        int targetH = Math.max(1, Math.round(h * ratio));
+
+        return Bitmap.createScaledBitmap(src, targetW, targetH, true);
+    }
+
+    private Bitmap adjustOrientation(ContentResolver resolver, Uri uri, Bitmap bitmap) {
+        InputStream is = null;
+        try {
+            is = resolver.openInputStream(uri);
+            if (is == null) return bitmap;
+            ExifInterface exif = new ExifInterface(is);
+            int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+            Matrix matrix = new Matrix();
+            if (orientation == ExifInterface.ORIENTATION_ROTATE_90) {
+                matrix.postRotate(90);
+            } else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) {
+                matrix.postRotate(180);
+            } else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) {
+                matrix.postRotate(270);
+            } else {
+                return bitmap;
             }
-            return baos.toByteArray();
+            Bitmap rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+            if (rotated != bitmap) {
+                bitmap.recycle();
+            }
+            return rotated;
         } catch (Exception e) {
-            return null;
+            return bitmap;
+        } finally {
+            if (is != null) {
+                try {
+                    is.close();
+                } catch (Exception ignored) {}
+            }
         }
     }
 
     private void processRandom20(PluginCall call) {
-        new Thread(() -> {
+        executor.execute(() -> {
             try {
                 String types = call.getString("types", "all");
-                List<MediaRef> allRefs = queryAllMediaReferences(types);
-                int count = Math.min(20, allRefs.size());
+                List<MediaRef> refs = queryStratifiedMedia(types, 20);
+                List<Callable<JSObject>> tasks = new ArrayList<>(refs.size());
+
+                for (MediaRef ref : refs) {
+                    tasks.add(() -> {
+                        byte[] bytes = decodeAndCompressThumbnail(ref.uri);
+                        if (bytes == null || bytes.length == 0) return null;
+                        String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                        JSObject item = new JSObject();
+                        item.put("identifier", String.valueOf(ref.id));
+                        item.put("type", "image");
+                        item.put("data", "data:image/jpeg;base64," + base64);
+                        return item;
+                    });
+                }
+
+                List<Future<JSObject>> futures = executor.invokeAll(tasks);
                 JSArray results = new JSArray();
 
-                for (int i = 0; i < count; i++) {
-                    MediaRef ref = allRefs.get(i);
-                    JSObject item = new JSObject();
-                    item.put("identifier", String.valueOf(ref.id));
-                    item.put("type", ref.isVideo ? "video" : "image");
-
-                    if (ref.isVideo) {
-                        byte[] videoBytes = processVideo(ref.uri, 10 * 1024 * 1024);
-                        if (videoBytes != null && videoBytes.length > 0) {
-                            String base64 = Base64.encodeToString(videoBytes, Base64.NO_WRAP);
-                            item.put("data", "data:video/mp4;base64," + base64);
+                for (Future<JSObject> future : futures) {
+                    try {
+                        JSObject item = future.get();
+                        if (item != null) {
                             results.put(item);
                         }
-                    } else {
-                        byte[] imgBytes = compressImage(ref.uri, 480, 50);
-                        if (imgBytes != null && imgBytes.length > 0) {
-                            String base64 = Base64.encodeToString(imgBytes, Base64.NO_WRAP);
-                            item.put("data", "data:image/jpeg;base64," + base64);
-                            results.put(item);
-                        }
-                    }
+                    } catch (Exception ignored) {}
                 }
 
                 JSObject res = new JSObject();
@@ -315,6 +380,12 @@ public class NativeGalleryPlugin extends Plugin {
             } catch (Exception e) {
                 call.reject(e.getMessage());
             }
-        }).start();
+        });
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        super.handleOnDestroy();
+        executor.shutdown();
     }
 }
