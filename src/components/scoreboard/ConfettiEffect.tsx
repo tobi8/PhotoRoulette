@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import confetti from 'canvas-confetti'
 
 interface ConfettiEffectProps {
@@ -6,73 +6,86 @@ interface ConfettiEffectProps {
 }
 
 export const ConfettiEffect: React.FC<ConfettiEffectProps> = ({ trigger = true }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const instanceRef = useRef<confetti.CreateTypes | null>(null)
+
   useEffect(() => {
-    if (!trigger) return
+    if (!trigger || !canvasRef.current) return
 
-    // Multi-stage confetti blast
-    const count = 200
-    const defaults = {
-      origin: { y: 0.7 },
-      zIndex: 9999,
-    }
+    confetti.reset()
 
-    function fire(particleRatio: number, opts: confetti.Options) {
-      confetti({
-        ...defaults,
-        ...opts,
-        particleCount: Math.floor(count * particleRatio),
-      })
-    }
-
-    fire(0.25, {
-      spread: 26,
-      startVelocity: 55,
+    const myConfetti = confetti.create(canvasRef.current, {
+      resize: true,
+      useWorker: false,
+      disableForReducedMotion: true,
     })
-    fire(0.2, {
+    instanceRef.current = myConfetti
+
+    myConfetti({
+      particleCount: 50,
       spread: 60,
-    })
-    fire(0.35, {
-      spread: 100,
-      decay: 0.91,
-      scalar: 0.8,
-    })
-    fire(0.1, {
-      spread: 120,
-      startVelocity: 25,
-      decay: 0.92,
-      scalar: 1.2,
-    })
-    fire(0.1, {
-      spread: 120,
       startVelocity: 45,
+      decay: 0.92,
+      ticks: 160,
+      origin: { y: 0.7 },
     })
 
+    myConfetti({
+      particleCount: 40,
+      spread: 100,
+      startVelocity: 35,
+      decay: 0.92,
+      ticks: 160,
+      origin: { y: 0.7 },
+    })
+
+    let count = 0
     const interval = setInterval(() => {
-      confetti({
-        particleCount: 40,
+      count++
+      if (count > 2) {
+        clearInterval(interval)
+        return
+      }
+
+      myConfetti({
+        particleCount: 25,
         angle: 60,
-        spread: 55,
-        origin: { x: 0 },
-        zIndex: 9999,
+        spread: 50,
+        startVelocity: 40,
+        decay: 0.92,
+        ticks: 160,
+        origin: { x: 0, y: 0.75 },
       })
-      confetti({
-        particleCount: 40,
+
+      myConfetti({
+        particleCount: 25,
         angle: 120,
-        spread: 55,
-        origin: { x: 1 },
-        zIndex: 9999,
+        spread: 50,
+        startVelocity: 40,
+        decay: 0.92,
+        ticks: 160,
+        origin: { x: 1, y: 0.75 },
       })
     }, 1200)
 
     const timeout = setTimeout(() => {
       clearInterval(interval)
-    }, 5000)
+    }, 3600)
 
     return () => {
       clearInterval(interval)
       clearTimeout(timeout)
+      if (instanceRef.current) {
+        instanceRef.current.reset()
+        instanceRef.current = null
+      }
     }
   }, [trigger])
 
-  return null
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 pointer-events-none z-[9999] w-full h-full"
+    />
+  )
 }
