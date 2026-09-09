@@ -48,7 +48,6 @@ import { HostRoundController } from './utils/hostRoundController'
 import { preloadMediaAsset } from './utils/mediaPreloader'
 import { clockSync } from './utils/clockSync'
 import { RoundPreloadPayload, RoundStartPayload, SubmitGuessPayload, LeaderboardSyncPayload, LeaderboardReadyAckPayload } from './types/game'
-import { PanicButton } from './components/game/PanicButton'
 
 
 const DEFAULT_SETTINGS: GameSettings = {
@@ -446,16 +445,15 @@ export default function App() {
         }
 
        
-        case 'PANIC_VETO': {
-          if (!stateRef.current.currentPlayer?.isHost) return
-          triggerVetoSequence()
-          break
-        }
-
-       
-        case 'VETO_TRIGGERED': {
-          playPanic()
-          setActiveRound((prev) => ({ ...prev, isVetoed: true }))
+        case 'PLAYER_KICKED': {
+          if (payload.playerId === stateRef.current.currentPlayer?.id) {
+            clearGameSession()
+            peerConnection.disconnect()
+            setCurrentPlayer(null)
+            setPlayers([])
+            setPhase('LANDING')
+            setLandingMode('SELECT')
+          }
           break
         }
 
@@ -1122,22 +1120,6 @@ export default function App() {
     }, 3500)
   }
 
-  const triggerVetoSequence = () => {
-    clearAutoTimer()
-    playPanic()
-    setActiveRound((prev) => ({ ...prev, isVetoed: true }))
-
-    peerConnection.broadcast({
-      type: 'VETO_TRIGGERED',
-      senderId: peerConnection.peerId,
-      payload: { reason: 'CENSORED_BY_OWNER' },
-    })
-
-    setTimeout(() => {
-      advanceToScoreboard(stateRef.current.players)
-    }, 2500)
-  }
-
   const advanceToScoreboard = (currentPlayersList?: Player[]) => {
     clearAutoTimer()
     const activePlayers = currentPlayersList || stateRef.current.players
@@ -1188,8 +1170,33 @@ export default function App() {
  
  
  
+  const handleRemovePlayer = (targetPlayerId: string) => {
+    if (!currentPlayer?.isHost || targetPlayerId === currentPlayer.id) return
+
+    mediaDeckRef.current = mediaDeckRef.current.filter((m) => m.ownerId !== targetPlayerId)
+
+    peerConnection.sendToPeer(targetPlayerId, {
+      type: 'PLAYER_KICKED',
+      senderId: peerConnection.peerId,
+      payload: { playerId: targetPlayerId },
+    })
+
+    peerConnection.kickPeer?.(targetPlayerId)
+
+    setPlayers((prev) => {
+      const updated = prev.filter((p) => p.id !== targetPlayerId)
+      peerConnection.broadcast({
+        type: 'STATE_SYNC',
+        senderId: peerConnection.peerId,
+        payload: { players: updated, settings: stateRef.current.settings },
+      })
+      saveGameSession({ players: updated })
+      return updated
+    })
+  }
+
   const handleAnswerSubmit = (guessedPlayerId: string) => {
-    if (activeRound.hasAnswered || activeRound.isVetoed) return
+    if (activeRound.hasAnswered) return
 
     const now = clockSync.now()
     const responseTime = Math.max(0, now - activeRound.startTime)
@@ -1232,23 +1239,11 @@ export default function App() {
   }
 
   const handleClientTimerExpire = () => {
-    if (!activeRound.hasAnswered && !activeRound.isVetoed) {
+    if (!activeRound.hasAnswered) {
       handleAnswerSubmit('')
     }
     if (currentPlayer?.isHost) {
       handleRoundTimerExpire()
-    }
-  }
-
-  const handlePanicVetoClick = () => {
-    if (currentPlayer?.isHost) {
-      triggerVetoSequence()
-    } else {
-      peerConnection.sendToHost({
-        type: 'PANIC_VETO',
-        senderId: currentPlayer?.id || peerConnection.peerId,
-        payload: { roundNumber: activeRound.roundNumber },
-      })
     }
   }
 
@@ -1479,7 +1474,12 @@ export default function App() {
                 />
 
                 {}
-                <PlayerList players={players} currentPlayerId={currentPlayer?.id} />
+                <PlayerList
+                  players={players}
+                  currentPlayerId={currentPlayer?.id}
+                  isHost={!!currentPlayer?.isHost}
+                  onRemovePlayer={handleRemovePlayer}
+                />
 
                 {}
                 {currentPlayer?.isHost && (
@@ -1541,24 +1541,18 @@ export default function App() {
               startTime={activeRound.startTime}
               endTime={activeRound.endTime}
               onExpire={handleClientTimerExpire}
-              isPaused={activeRound.isVetoed}
             />
 
             <MediaViewer
               media={activeRound.activeMedia}
               progressiveBlur={settings.progressiveBlur}
               durationSec={activeRound.duration}
-              isVetoed={activeRound.isVetoed}
               isTimeUp={phase !== 'ACTIVE_ROUND'}
               isHostTV={settings.tvMode && currentPlayer?.isHost}
               isMuted={isMuted}
             />
 
-            {activeRound.activeMedia.isOwner && !activeRound.isVetoed && (
-              <PanicButton onPanicVeto={handlePanicVetoClick} />
-            )}
-
-            {(!settings.tvMode || !currentPlayer?.isHost) && !activeRound.isVetoed && (
+            {(!settings.tvMode || !currentPlayer?.isHost) && (
               <PlayerGrid
                 players={players}
                 selectedPlayerId={activeRound.selectedPlayerId}

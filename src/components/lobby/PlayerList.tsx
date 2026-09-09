@@ -1,5 +1,5 @@
 import React from 'react'
-import { Crown, Image, Check, Clock } from 'lucide-react'
+import { Crown, Image, Check, Clock, UserX } from 'lucide-react'
 import { Player } from '../../types/game'
 import { Avatar } from '../ui/Avatar'
 import { Badge } from '../ui/Badge'
@@ -7,11 +7,15 @@ import { Badge } from '../ui/Badge'
 interface PlayerListProps {
   players: Player[]
   currentPlayerId?: string
+  isHost?: boolean
+  onRemovePlayer?: (playerId: string) => void
 }
 
 export const PlayerList: React.FC<PlayerListProps> = ({
   players,
   currentPlayerId,
+  isHost = false,
+  onRemovePlayer,
 }) => {
   return (
     <div className="w-full">
@@ -27,6 +31,7 @@ export const PlayerList: React.FC<PlayerListProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         {players.map((player) => {
           const isYou = player.id === currentPlayerId
+          const canRemove = isHost && !player.isHost
 
           return (
             <div
@@ -72,7 +77,7 @@ export const PlayerList: React.FC<PlayerListProps> = ({
                 </div>
               </div>
 
-              <div>
+              <div className="flex items-center gap-2">
                 {player.isReady ? (
                   <Badge variant="success" size="sm">
                     <Check size={12} /> Ready
@@ -81,6 +86,16 @@ export const PlayerList: React.FC<PlayerListProps> = ({
                   <Badge variant="warning" size="sm">
                     <Clock size={12} /> Picking
                   </Badge>
+                )}
+
+                {canRemove && onRemovePlayer && (
+                  <button
+                    onClick={() => onRemovePlayer(player.id)}
+                    className="p-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 transition-all cursor-pointer"
+                    title={`Remove ${player.name}`}
+                  >
+                    <UserX size={14} />
+                  </button>
                 )}
               </div>
             </div>

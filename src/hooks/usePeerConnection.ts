@@ -198,6 +198,16 @@ export function usePeerConnection(
     [sendThroughConnection]
   )
 
+  const kickPeer = useCallback((targetPeerId: string) => {
+    const conn = connectionsRef.current.get(targetPeerId)
+    if (conn) {
+      try {
+        conn.close()
+      } catch {}
+      connectionsRef.current.delete(targetPeerId)
+    }
+  }, [])
+
   const performTimeSync = useCallback(() => {
     if (hostConnectionRef.current && hostConnectionRef.current.open) {
       for (let i = 0; i < 3; i++) {
@@ -377,6 +387,7 @@ export function usePeerConnection(
     broadcast,
     sendToPeer,
     sendToHost,
+    kickPeer,
     disconnect: cleanup,
     syncClock: performTimeSync,
   }

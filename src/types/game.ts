@@ -67,7 +67,7 @@ export interface ActiveRoundState {
   duration: number
   startTime: number
   endTime?: number
-  isVetoed: boolean
+  isVetoed?: boolean
   hasAnswered: boolean
   selectedPlayerId?: string
   results?: {
@@ -99,8 +99,7 @@ export type MessageType =
   | 'ROUND_START'
   | 'SUBMIT_GUESS'
   | 'ANSWER_SUBMITTED'
-  | 'PANIC_VETO'
-  | 'VETO_TRIGGERED'
+  | 'PLAYER_KICKED'
   | 'ROUND_END'
   | 'LEADERBOARD_BARRIER_SYNC'
   | 'LEADERBOARD_READY_ACK'
