@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Peer, { DataConnection } from 'peerjs'
 import { PeerMessage } from '../types/game'
 import { CHUNK_SIZE } from '../utils/imageCompression'
+import { clockSync } from '../utils/clockSync'
 
-// Room code prefix to avoid collisions on public PeerJS cloud
 const PEER_PREFIX = 'pr-roulette-v1-'
 
 export function formatRoomCode(raw: string) {
@@ -11,7 +11,7 @@ export function formatRoomCode(raw: string) {
 }
 
 export function generateRoomCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // Omit 0/O and 1/I for clarity
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let result = ''
   for (let i = 0; i < 5; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length))
@@ -34,7 +34,6 @@ export function usePeerConnection(
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map())
   const hostConnectionRef = useRef<DataConnection | null>(null)
 
-  // Chunk reassembly buffers: messageId -> { received: Map<number, string>, total: number }
   const chunkBuffersRef = useRef<Map<string, { received: Map<number, string>; total: number }>>(new Map())
 
   const messageHandlerRef = useRef(onMessageReceived)
@@ -43,7 +42,104 @@ export function usePeerConnection(
   const disconnectHandlerRef = useRef(onPeerDisconnected)
   disconnectHandlerRef.current = onPeerDisconnected
 
-  // Clean up existing peer and connections
+  const sendThroughConnection = useCallback(async (conn: DataConnection, message: PeerMessage) => {
+    if (!conn || !conn.open) return
+
+    const serialized = JSON.stringify(message)
+    if (serialized.length > CHUNK_SIZE) {
+      const chunkId = `chunk-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      const total = Math.ceil(serialized.length / CHUNK_SIZE)
+      for (let i = 0; i < total; i++) {
+        if (!conn.open) return
+        const dc = (conn as any).dataChannel as RTCDataChannel | undefined
+        if (dc && dc.bufferedAmount > 64 * 1024) {
+          await new Promise<void>((resolve) => {
+            const check = () => {
+              if (!dc || dc.bufferedAmount <= 16 * 1024) {
+                resolve()
+              } else {
+                setTimeout(check, 15)
+              }
+            }
+            setTimeout(check, 15)
+          })
+        }
+        const slice = serialized.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+        conn.send({
+          type: 'DATA_CHUNK',
+          senderId: message.senderId,
+          payload: {
+            chunkId,
+            index: i,
+            total,
+            data: slice,
+          },
+        })
+        if (i % 8 === 7) {
+          await new Promise((r) => setTimeout(r, 5))
+        }
+      }
+    } else {
+      conn.send(message)
+    }
+  }, [])
+
+  const handleRawData = useCallback((data: any, fromPeerId: string) => {
+    if (!data) return
+
+    if (data.type === 'DATA_CHUNK' && data.payload) {
+      const { chunkId, index, total, data: chunkData } = data.payload
+      let buffer = chunkBuffersRef.current.get(chunkId)
+      if (!buffer) {
+        buffer = { received: new Map(), total }
+        chunkBuffersRef.current.set(chunkId, buffer)
+      }
+      buffer.received.set(index, chunkData)
+
+      if (buffer.received.size === buffer.total) {
+        let fullStr = ''
+        for (let i = 0; i < buffer.total; i++) {
+          fullStr += buffer.received.get(i) || ''
+        }
+        chunkBuffersRef.current.delete(chunkId)
+        try {
+          const originalMsg: PeerMessage = JSON.parse(fullStr)
+          handleRawData(originalMsg, fromPeerId)
+        } catch {}
+      }
+      return
+    }
+
+    if (data.type === 'PING') {
+      const conn = connectionsRef.current.get(fromPeerId) || (hostConnectionRef.current?.peer === fromPeerId ? hostConnectionRef.current : null)
+      if (conn && conn.open) {
+        sendThroughConnection(conn, {
+          type: 'PONG',
+          senderId: peerRef.current?.id || '',
+          payload: {
+            clientSendTime: data.payload?.clientSendTime,
+            serverReceiveTime: Date.now(),
+          },
+        })
+      }
+      return
+    }
+
+    if (data.type === 'PONG') {
+      const clientReceiveTime = Date.now()
+      const clientSendTime = data.payload?.clientSendTime
+      const serverTime = data.payload?.serverReceiveTime
+      if (clientSendTime && serverTime) {
+        clockSync.recordSample(clientSendTime, serverTime, clientReceiveTime)
+      }
+      return
+    }
+
+    if (data.type) {
+      messageHandlerRef.current?.(data as PeerMessage, fromPeerId)
+    }
+  }, [sendThroughConnection])
+
   const cleanup = useCallback(() => {
     connectionsRef.current.forEach((conn) => {
       try {
@@ -67,76 +163,13 @@ export function usePeerConnection(
     }
 
     chunkBuffersRef.current.clear()
+    clockSync.reset()
     setIsConnected(false)
     setIsConnecting(false)
     setPeerId('')
     setError(null)
   }, [])
 
-  // Process received raw data (handles chunking & direct messages)
-  const handleRawData = useCallback((data: any, fromPeerId: string) => {
-    if (!data) return
-
-    // Chunk packet handling
-    if (data.type === 'DATA_CHUNK' && data.payload) {
-      const { chunkId, index, total, data: chunkData } = data.payload
-      let buffer = chunkBuffersRef.current.get(chunkId)
-      if (!buffer) {
-        buffer = { received: new Map(), total }
-        chunkBuffersRef.current.set(chunkId, buffer)
-      }
-      buffer.received.set(index, chunkData)
-
-      // Reassemble once complete
-      if (buffer.received.size === buffer.total) {
-        let fullStr = ''
-        for (let i = 0; i < buffer.total; i++) {
-          fullStr += buffer.received.get(i) || ''
-        }
-        chunkBuffersRef.current.delete(chunkId)
-        try {
-          const originalMsg: PeerMessage = JSON.parse(fullStr)
-          messageHandlerRef.current?.(originalMsg, fromPeerId)
-        } catch (e) {
-          console.error('Failed to parse reassembled chunk message:', e)
-        }
-      }
-      return
-    }
-
-    // Direct PeerMessage
-    if (data.type) {
-      messageHandlerRef.current?.(data as PeerMessage, fromPeerId)
-    }
-  }, [])
-
-  // Safely send a message through a DataConnection (chunked if large)
-  const sendThroughConnection = useCallback((conn: DataConnection, message: PeerMessage) => {
-    if (!conn || !conn.open) return
-
-    const serialized = JSON.stringify(message)
-    if (serialized.length > CHUNK_SIZE) {
-      const chunkId = `chunk-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-      const total = Math.ceil(serialized.length / CHUNK_SIZE)
-      for (let i = 0; i < total; i++) {
-        const slice = serialized.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
-        conn.send({
-          type: 'DATA_CHUNK',
-          senderId: message.senderId,
-          payload: {
-            chunkId,
-            index: i,
-            total,
-            data: slice,
-          },
-        })
-      }
-    } else {
-      conn.send(message)
-    }
-  }, [])
-
-  // Host: Broadcast message to all connected clients
   const broadcast = useCallback(
     (message: PeerMessage) => {
       connectionsRef.current.forEach((conn) => {
@@ -146,7 +179,6 @@ export function usePeerConnection(
     [sendThroughConnection]
   )
 
-  // Host: Send message to specific client
   const sendToPeer = useCallback(
     (targetPeerId: string, message: PeerMessage) => {
       const conn = connectionsRef.current.get(targetPeerId)
@@ -157,19 +189,31 @@ export function usePeerConnection(
     [sendThroughConnection]
   )
 
-  // Client: Send message to Host
   const sendToHost = useCallback(
     (message: PeerMessage) => {
       if (hostConnectionRef.current && hostConnectionRef.current.open) {
         sendThroughConnection(hostConnectionRef.current, message)
-      } else {
-        console.warn('Host connection not open, could not send message:', message.type)
       }
     },
     [sendThroughConnection]
   )
 
-  // Host: Create a new room
+  const performTimeSync = useCallback(() => {
+    if (hostConnectionRef.current && hostConnectionRef.current.open) {
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => {
+          if (hostConnectionRef.current && hostConnectionRef.current.open) {
+            sendThroughConnection(hostConnectionRef.current, {
+              type: 'PING',
+              senderId: peerRef.current?.id || '',
+              payload: { clientSendTime: Date.now() },
+            })
+          }
+        }, i * 200)
+      }
+    }
+  }, [sendThroughConnection])
+
   const createRoom = useCallback(
     async (customCode?: string): Promise<{ code: string; peerId: string }> => {
       cleanup()
@@ -216,17 +260,14 @@ export function usePeerConnection(
               disconnectHandlerRef.current?.(conn.peer)
             })
 
-            conn.on('error', (err) => {
-              console.warn(`Connection error with peer ${conn.peer}:`, err)
+            conn.on('error', () => {
               connectionsRef.current.delete(conn.peer)
               disconnectHandlerRef.current?.(conn.peer)
             })
           })
 
           peer.on('error', (err: any) => {
-            console.error('PeerJS error:', err)
             if (err.type === 'unavailable-id') {
-              // Code collision, retry with new code
               const retryCode = generateRoomCode()
               createRoom(retryCode).then(resolve).catch(reject)
             } else {
@@ -245,7 +286,6 @@ export function usePeerConnection(
     [cleanup, handleRawData]
   )
 
-  // Client: Join an existing room
   const joinRoom = useCallback(
     async (codeToJoin: string): Promise<{ code: string; peerId: string }> => {
       cleanup()
@@ -258,7 +298,6 @@ export function usePeerConnection(
 
       return new Promise((resolve, reject) => {
         try {
-          // Initialize client peer with random ID
           const peer = new Peer({
             debug: 1,
             config: {
@@ -275,7 +314,6 @@ export function usePeerConnection(
             setPeerId(id)
             setRoomCode(formattedCode)
 
-            // Connect to host
             const conn = peer.connect(hostFullPeerId, {
               reliable: true,
             })
@@ -285,6 +323,7 @@ export function usePeerConnection(
             conn.on('open', () => {
               setIsConnected(true)
               setIsConnecting(false)
+              performTimeSync()
               resolve({ code: formattedCode, peerId: id })
             })
 
@@ -299,7 +338,6 @@ export function usePeerConnection(
             })
 
             conn.on('error', (err) => {
-              console.error('Host connection error:', err)
               setError('Failed to establish connection with room')
               setIsConnecting(false)
               reject(err)
@@ -307,7 +345,6 @@ export function usePeerConnection(
           })
 
           peer.on('error', (err: any) => {
-            console.error('PeerJS client error:', err)
             setError(err.message || 'Room connection failed. Check room code.')
             setIsConnecting(false)
             reject(err)
@@ -319,10 +356,9 @@ export function usePeerConnection(
         }
       })
     },
-    [cleanup, handleRawData]
+    [cleanup, handleRawData, performTimeSync]
   )
 
-  // Disconnect & destroy on unmount
   useEffect(() => {
     return () => {
       cleanup()
@@ -342,5 +378,6 @@ export function usePeerConnection(
     sendToPeer,
     sendToHost,
     disconnect: cleanup,
+    syncClock: performTimeSync,
   }
 }

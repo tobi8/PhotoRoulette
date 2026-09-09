@@ -27,19 +27,16 @@ import {
 } from './utils/mockData'
 import { buildBalancedRouletteDeck } from './utils/deckBuilder'
 
-// UI Components
 import { Button } from './components/ui/Button'
 import { Card } from './components/ui/Card'
 import { SoundToggle } from './components/ui/SoundToggle'
 import { Badge } from './components/ui/Badge'
 
-// Lobby Components
 import { QRCodeDisplay } from './components/lobby/QRCodeDisplay'
 import { PlayerList } from './components/lobby/PlayerList'
 import { SettingsDrawer } from './components/lobby/SettingsDrawer'
 import { MediaUploader } from './components/lobby/MediaUploader'
 
-// Game Components
 import { MediaViewer } from './components/game/MediaViewer'
 import { TimerBar } from './components/game/TimerBar'
 import { PlayerGrid } from './components/game/PlayerGrid'
@@ -47,6 +44,12 @@ import { RevealCard } from './components/game/RevealCard'
 
 import { LeaderboardRace } from './components/scoreboard/LeaderboardRace'
 import { Podium } from './components/scoreboard/Podium'
+import { HostRoundController } from './utils/hostRoundController'
+import { preloadMediaAsset } from './utils/mediaPreloader'
+import { clockSync } from './utils/clockSync'
+import { RoundPreloadPayload, RoundStartPayload, SubmitGuessPayload, LeaderboardSyncPayload, LeaderboardReadyAckPayload } from './types/game'
+import { PanicButton } from './components/game/PanicButton'
+
 
 const DEFAULT_SETTINGS: GameSettings = {
   roundDuration: 5,
@@ -87,7 +90,7 @@ function clearGameSession() {
 }
 
 export default function App() {
-  // Sound system
+ 
   const {
     isMuted,
     toggleMute,
@@ -100,17 +103,17 @@ export default function App() {
     playVictory,
   } = useSoundEffects()
 
-  // Game Engine State
+ 
   const [phase, setPhase] = useState<GamePhase>('LANDING')
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_SETTINGS)
   const [players, setPlayers] = useState<Player[]>([])
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null)
   const [countdownNum, setCountdownNum] = useState<number>(3)
 
-  // Local media deck uploaded by this client
+ 
   const [isReady, setIsReady] = useState<boolean>(false)
 
-  // Host-only aggregated media pool & game history
+ 
   const mediaDeckRef = useRef<MediaItem[]>([])
   const roundHistoryRef = useRef<
     Array<{
@@ -121,8 +124,11 @@ export default function App() {
   >([])
   const currentRoundIndexRef = useRef<number>(0)
   const autoAdvanceTimerRef = useRef<any>(null)
+  const hostRoundControllerRef = useRef<HostRoundController | null>(null)
+  const [isPreloading, setIsPreloading] = useState<boolean>(false)
 
-  // Active round state (synchronized across host & players)
+
+ 
   const [activeRound, setActiveRound] = useState<ActiveRoundState>({
     roundNumber: 0,
     totalRounds: 0,
@@ -133,7 +139,7 @@ export default function App() {
     hasAnswered: false,
   })
 
-  // Final Awards
+ 
   const [gameAwards, setGameAwards] = useState<GameAwards>({})
 
   const [inputName, setInputName] = useState(() => {
@@ -148,7 +154,7 @@ export default function App() {
   const [selectedColor, setSelectedColor] = useState(AVATAR_COLORS[0])
   const [landingMode, setLandingMode] = useState<'SELECT' | 'HOST_SETUP' | 'JOIN_SETUP'>('SELECT')
 
-  // Ref to hold current state for peer message handlers without stale closures
+ 
   const stateRef = useRef({
     phase,
     players,
@@ -158,7 +164,7 @@ export default function App() {
   })
   stateRef.current = { phase, players, currentPlayer, settings, activeRound }
 
-  // Clear any running auto timer
+ 
   const clearAutoTimer = useCallback(() => {
     if (autoAdvanceTimerRef.current) {
       clearTimeout(autoAdvanceTimerRef.current)
@@ -167,18 +173,21 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    return () => clearAutoTimer()
+    return () => {
+      clearAutoTimer()
+      hostRoundControllerRef.current?.cleanup()
+    }
   }, [clearAutoTimer])
 
-  // --------------------------------------------------------------------------
-  // Message Handlers (WebRTC P2P)
-  // --------------------------------------------------------------------------
+ 
+ 
+ 
   const handlePeerMessage = useCallback(
     (msg: PeerMessage, fromPeerId: string) => {
       const { type, payload } = msg
 
       switch (type) {
-        // [HOST HANDLER] New player requests to join
+       
         case 'JOIN_REQUEST': {
           if (!stateRef.current.currentPlayer?.isHost) return
 
@@ -201,7 +210,7 @@ export default function App() {
             const exists = prev.some((p) => p.id === newPlayer.id)
             const updated = exists ? prev.map((p) => (p.id === newPlayer.id ? newPlayer : p)) : [...prev, newPlayer]
 
-            // Accept player and send welcome packet
+           
             peerConnection.sendToPeer(fromPeerId, {
               type: 'JOIN_ACCEPTED',
               senderId: peerConnection.peerId,
@@ -212,7 +221,7 @@ export default function App() {
               },
             })
 
-            // Broadcast updated player list to all clients
+           
             peerConnection.broadcast({
               type: 'STATE_SYNC',
               senderId: peerConnection.peerId,
@@ -227,7 +236,7 @@ export default function App() {
           break
         }
 
-        // [CLIENT HANDLER] Host accepted our join request
+       
         case 'JOIN_ACCEPTED': {
           setCurrentPlayer(payload.player)
           setSettings(payload.settings)
@@ -245,7 +254,7 @@ export default function App() {
           break
         }
 
-        // [HOST HANDLER] Player contributed their media photos
+       
         case 'MEDIA_CONTRIBUTION': {
           if (!stateRef.current.currentPlayer?.isHost) return
           const items: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }> = payload.items || []
@@ -259,13 +268,13 @@ export default function App() {
           }))
 
           if (isInitial) {
-            // Replace previous contributions for this player with initial batch
+           
             mediaDeckRef.current = [
               ...mediaDeckRef.current.filter((m) => m.ownerId !== contributorId),
               ...mapped,
             ]
           } else {
-            // Append subsequent batch and deduplicate by id
+           
             const existingIds = new Set(mediaDeckRef.current.map((m) => m.id))
             const newItems = mapped.filter((m) => !existingIds.has(m.id))
             mediaDeckRef.current = [...mediaDeckRef.current, ...newItems]
@@ -273,7 +282,7 @@ export default function App() {
 
           const currentCount = mediaDeckRef.current.filter((m) => m.ownerId === contributorId).length
 
-          // Update player's mediaCount
+         
           setPlayers((prev) => {
             const updated = prev.map((p) => (p.id === contributorId ? { ...p, mediaCount: currentCount } : p))
             peerConnection.broadcast({
@@ -287,7 +296,7 @@ export default function App() {
           break
         }
 
-        // [HOST HANDLER] Player ready toggle
+       
         case 'PLAYER_READY': {
           if (!stateRef.current.currentPlayer?.isHost) return
           const readyPlayerId = payload.playerId || fromPeerId
@@ -305,7 +314,7 @@ export default function App() {
           break
         }
 
-        // [CLIENT & HOST HANDLER] State synchronization
+       
         case 'STATE_SYNC': {
           if (payload.players) {
             setPlayers(payload.players)
@@ -318,7 +327,70 @@ export default function App() {
           break
         }
 
-        // [CLIENT HANDLER] Round countdown broadcast
+       
+                case 'ROUND_PRELOAD': {
+          setPhase('PRECACHE')
+          setIsPreloading(true)
+          const preloadData = payload as RoundPreloadPayload
+          preloadMediaAsset(preloadData.media.dataUrl, preloadData.media.type).then((res) => {
+            setIsPreloading(false)
+            peerConnection.sendToHost({
+              type: 'CLIENT_PRELOAD_ACK',
+              senderId: stateRef.current.currentPlayer?.id || peerConnection.peerId,
+              payload: {
+                roundNumber: preloadData.roundNumber,
+                playerId: stateRef.current.currentPlayer?.id || peerConnection.peerId,
+                success: res.success,
+              },
+            })
+          })
+          break
+        }
+
+        case 'CLIENT_PRELOAD_ACK': {
+          if (!stateRef.current.currentPlayer?.isHost) return
+          hostRoundControllerRef.current?.handleClientPreloadAck(payload.roundNumber, payload.playerId || fromPeerId)
+          break
+        }
+
+        case 'LEADERBOARD_READY_ACK': {
+          if (!stateRef.current.currentPlayer?.isHost) return
+          hostRoundControllerRef.current?.handleLeaderboardAck(payload.roundNumber, payload.playerId || fromPeerId)
+          break
+        }
+
+        case 'LEADERBOARD_BARRIER_SYNC': {
+          setPhase('LEADERBOARD')
+          if (payload.players) setPlayers(payload.players)
+          setTimeout(() => {
+            peerConnection.sendToHost({
+              type: 'LEADERBOARD_READY_ACK',
+              senderId: stateRef.current.currentPlayer?.id || peerConnection.peerId,
+              payload: {
+                roundNumber: payload.roundNumber,
+                playerId: stateRef.current.currentPlayer?.id || peerConnection.peerId,
+              },
+            })
+          }, 1500)
+          break
+        }
+
+        case 'SUBMIT_GUESS': {
+          if (!stateRef.current.currentPlayer?.isHost) return
+          const guessData = payload as SubmitGuessPayload
+          const effPlayerId = guessData.playerId || fromPeerId
+          const roundIdx = currentRoundIndexRef.current
+          const hist = roundHistoryRef.current[roundIdx]
+          if (hist) {
+            const isCorrect = guessData.selectedChoice === hist.ownerId
+            hist.answers[effPlayerId] = {
+              guessedPlayerId: guessData.selectedChoice,
+              isCorrect,
+              responseTime: guessData.responseTime,
+            }
+          }
+          break
+        }
         case 'ROUND_COUNTDOWN': {
           setPhase('COUNTDOWN')
           setCountdownNum(payload.count)
@@ -330,7 +402,7 @@ export default function App() {
           break
         }
 
-        // [CLIENT HANDLER] Active round started
+       
         case 'ROUND_START': {
           setPhase('ACTIVE_ROUND')
           playWhoosh()
@@ -347,13 +419,15 @@ export default function App() {
             },
             duration: payload.duration,
             startTime: payload.startTime,
+            endTime: payload.endTime,
             isVetoed: false,
             hasAnswered: false,
+            selectedPlayerId: undefined,
           })
           break
         }
 
-        // [HOST HANDLER] Player submitted answer
+       
         case 'ANSWER_SUBMITTED': {
           if (!stateRef.current.currentPlayer?.isHost) return
           const { playerId, guessedPlayerId, responseTime } = payload
@@ -372,21 +446,21 @@ export default function App() {
           break
         }
 
-        // [HOST HANDLER] Photo owner hit panic / veto button
+       
         case 'PANIC_VETO': {
           if (!stateRef.current.currentPlayer?.isHost) return
           triggerVetoSequence()
           break
         }
 
-        // [CLIENT HANDLER] Veto triggered broadcast
+       
         case 'VETO_TRIGGERED': {
           playPanic()
           setActiveRound((prev) => ({ ...prev, isVetoed: true }))
           break
         }
 
-        // [CLIENT HANDLER] Round ended, reveal owner & results
+       
         case 'ROUND_END': {
           setPhase('REVEAL')
           const myId = stateRef.current.currentPlayer?.id || ''
@@ -407,14 +481,14 @@ export default function App() {
           break
         }
 
-        // [CLIENT HANDLER] Leaderboard view
+       
         case 'LEADERBOARD_VIEW': {
           setPhase('LEADERBOARD')
           setPlayers(payload.players)
           break
         }
 
-        // [CLIENT HANDLER] Game Over Podium
+       
         case 'GAME_OVER': {
           setPhase('GAME_OVER')
           setPlayers(payload.players)
@@ -423,7 +497,7 @@ export default function App() {
           break
         }
 
-        // [CLIENT HANDLER] Return to lobby
+       
         case 'PLAY_AGAIN': {
           setPhase('LOBBY')
           setActiveRound({
@@ -529,9 +603,9 @@ export default function App() {
     }
   }, [])
 
-  // --------------------------------------------------------------------------
-  // Host Game Logic & Transitions
-  // --------------------------------------------------------------------------
+ 
+ 
+ 
   const startHostGame = async () => {
     const trimmed = inputName.trim()
     if (!trimmed) return
@@ -617,12 +691,12 @@ export default function App() {
     })
   }
 
-  // Host adds a simulated bot player for quick testing
+ 
   const addSimulatedBot = () => {
     const botTemplate = MOCK_BOT_PLAYERS[players.length % MOCK_BOT_PLAYERS.length]
     const botId = `bot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 
-    // Generate mock media for this bot matching the selected mediaType
+   
     const botRawMedia = (
       settings.mediaType === 'videos_only'
         ? getMockPartyVideos().slice(0, 4)
@@ -660,7 +734,7 @@ export default function App() {
     playPop()
   }
 
-  // Host updates settings and broadcasts
+ 
   const handleUpdateSettings = (newSettings: GameSettings) => {
     setSettings(newSettings)
     peerConnection.broadcast({
@@ -670,12 +744,12 @@ export default function App() {
     })
   }
 
-  // Player contributes photos (auto-called by MediaUploader)
+ 
   const handleMediaContribute = (items: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }>) => {
     const myId = currentPlayer?.id || peerConnection.peerId
 
     if (currentPlayer?.isHost) {
-      // Host adds directly to deck
+     
       const hostItems: MediaItem[] = items.map((i) => ({
         ...i,
         ownerId: myId,
@@ -689,7 +763,7 @@ export default function App() {
         prev.map((p) => (p.id === myId ? { ...p, mediaCount: items.length } : p))
       )
     } else {
-      // Client sends to host in small batches to prevent WebRTC DataChannel buffer overflow
+     
       const BATCH_SIZE = 2
       const sendBatches = async () => {
         for (let i = 0; i < items.length; i += BATCH_SIZE) {
@@ -731,13 +805,114 @@ export default function App() {
     playPop()
   }
 
-  // --------------------------------------------------------------------------
-  // Game Loop Coordination (Host-Authoritative with 3s Hands-Free Automation)
-  // --------------------------------------------------------------------------
+ 
+ 
+ 
+    const initHostRoundController = useCallback(() => {
+    if (hostRoundControllerRef.current) {
+      hostRoundControllerRef.current.cleanup()
+    }
+
+    hostRoundControllerRef.current = new HostRoundController({
+      onPreloadBroadcast: (payload: RoundPreloadPayload) => {
+        setPhase('PRECACHE')
+        setIsPreloading(true)
+        peerConnection.broadcast({
+          type: 'ROUND_PRELOAD',
+          senderId: peerConnection.peerId,
+          payload,
+        })
+        preloadMediaAsset(payload.media.dataUrl, payload.media.type).then(() => {
+          setIsPreloading(false)
+          hostRoundControllerRef.current?.handleClientPreloadAck(payload.roundNumber, peerConnection.peerId)
+        })
+      },
+      onRoundStartBroadcast: (payload: RoundStartPayload) => {
+        setPhase('ACTIVE_ROUND')
+        playWhoosh()
+        const isOwner = payload.media.ownerId === stateRef.current.currentPlayer?.id
+
+        setActiveRound({
+          roundNumber: payload.roundNumber,
+          totalRounds: payload.totalRounds,
+          activeMedia: {
+            id: payload.media.id,
+            type: payload.media.type,
+            dataUrl: payload.media.dataUrl,
+            isOwner,
+          },
+          duration: payload.duration,
+          startTime: payload.startTime,
+          endTime: payload.endTime,
+          isVetoed: false,
+          hasAnswered: false,
+          selectedPlayerId: undefined,
+        })
+
+        peerConnection.broadcast({
+          type: 'ROUND_START',
+          senderId: peerConnection.peerId,
+          payload,
+        })
+
+        const activeDeck = mediaDeckRef.current
+        const roundMedia = activeDeck[currentRoundIndexRef.current]
+        const currentList = stateRef.current.players
+
+        currentList.forEach((p) => {
+          if (p.id.startsWith('bot-')) {
+            const botDelay = 1200 + Math.random() * (payload.duration * 1000 - 1500)
+            setTimeout(() => {
+              const isCorrect = Math.random() > 0.35
+              const guessedId = isCorrect
+                ? (roundMedia ? roundMedia.ownerId : p.id)
+                : currentList.find((other) => other.id !== roundMedia?.ownerId)?.id || roundMedia?.ownerId || p.id
+
+              const history = roundHistoryRef.current[currentRoundIndexRef.current]
+              if (history) {
+                history.answers[p.id] = {
+                  guessedPlayerId: guessedId,
+                  isCorrect,
+                  responseTime: botDelay,
+                }
+              }
+            }, botDelay)
+          }
+        })
+      },
+      onRoundExpire: () => {
+        handleRoundTimerExpire()
+      },
+      onLeaderboardBroadcast: (payload: LeaderboardSyncPayload) => {
+        setPhase('LEADERBOARD')
+        setPlayers(payload.players)
+        peerConnection.broadcast({
+          type: 'LEADERBOARD_BARRIER_SYNC',
+          senderId: peerConnection.peerId,
+          payload,
+        })
+      },
+      onAdvanceToNextRound: (nextRoundNumber: number) => {
+        currentRoundIndexRef.current++
+        runNextRound(nextRoundNumber, stateRef.current.players)
+      },
+      onGameOver: () => {
+        const awards = calculateAwards(stateRef.current.players, roundHistoryRef.current)
+        setGameAwards(awards)
+        setPhase('GAME_OVER')
+        playVictory()
+        peerConnection.broadcast({
+          type: 'GAME_OVER',
+          senderId: peerConnection.peerId,
+          payload: { players: stateRef.current.players, awards },
+        })
+      },
+    })
+  }, [peerConnection, playWhoosh, playVictory])
+
   const startFullGame = () => {
     clearAutoTimer()
 
-    // Build fair, balanced deck distributed evenly across all contributing players
     const currentDeck = buildBalancedRouletteDeck(
       mediaDeckRef.current,
       players,
@@ -745,10 +920,8 @@ export default function App() {
       settings.totalRounds || 10
     )
 
-    // Set media deck
     mediaDeckRef.current = currentDeck
 
-    // Reset scores & streaks
     const resetPlayers = players.map((p) => ({
       ...p,
       score: 0,
@@ -761,16 +934,23 @@ export default function App() {
     roundHistoryRef.current = []
     currentRoundIndexRef.current = 0
 
+    initHostRoundController()
+    hostRoundControllerRef.current?.initGame(
+      currentDeck,
+      resetPlayers,
+      settings.roundDuration,
+      settings.totalRounds || 10,
+      settings.progressiveBlur
+    )
+
     runNextRound(1, resetPlayers)
   }
 
-  // Runs round with 3-second countdown
   const runNextRound = (roundNum: number, currentPlayersList: Player[]) => {
     clearAutoTimer()
     const totalRounds = Math.min(settings.totalRounds, mediaDeckRef.current.length)
 
     if (roundNum > totalRounds || currentRoundIndexRef.current >= mediaDeckRef.current.length) {
-      // Game Over!
       const awards = calculateAwards(currentPlayersList, roundHistoryRef.current)
       setGameAwards(awards)
       setPhase('GAME_OVER')
@@ -784,7 +964,6 @@ export default function App() {
       return
     }
 
-    // Step 1: Countdown Phase (3, 2, 1)
     setPhase('COUNTDOWN')
     setCountdownNum(3)
     playCountdownBeep(false)
@@ -809,13 +988,12 @@ export default function App() {
       } else {
         clearInterval(countdownTimer)
         playCountdownBeep(true)
-        launchActiveRound(roundNum, totalRounds, currentPlayersList)
+        launchActiveRound(roundNum)
       }
     }, 1000)
   }
 
-  // Step 2: Launch Active Round
-  const launchActiveRound = (roundNum: number, totalRounds: number, currentPlayersList: Player[]) => {
+  const launchActiveRound = (roundNum: number) => {
     clearAutoTimer()
     const media = mediaDeckRef.current[currentRoundIndexRef.current]
     if (!media) return
@@ -826,74 +1004,11 @@ export default function App() {
       answers: {},
     })
 
-    const startTime = Date.now()
-    const duration = settings.roundDuration
-
-    const isOwner = media.ownerId === currentPlayer?.id
-
-    setPhase('ACTIVE_ROUND')
-    playWhoosh()
-
-    setActiveRound({
-      roundNumber: roundNum,
-      totalRounds,
-      activeMedia: {
-        id: media.id,
-        type: media.type,
-        dataUrl: media.dataUrl,
-        isOwner,
-      },
-      duration,
-      startTime,
-      isVetoed: false,
-      hasAnswered: false,
-    })
-
-    // Broadcast active round to players
-    peerConnection.broadcast({
-      type: 'ROUND_START',
-      senderId: peerConnection.peerId,
-      payload: {
-        roundNumber: roundNum,
-        totalRounds,
-        media: {
-          id: media.id,
-          type: media.type,
-          dataUrl: media.dataUrl,
-          ownerId: media.ownerId,
-        },
-        duration,
-        startTime,
-        progressiveBlur: settings.progressiveBlur,
-      },
-    })
-
-    // Simulate bot answers with realistic human delays
-    currentPlayersList.forEach((p) => {
-      if (p.id.startsWith('bot-')) {
-        const botDelay = 1200 + Math.random() * (duration * 1000 - 1500)
-        setTimeout(() => {
-          const isCorrect = Math.random() > 0.35 // 65% accuracy
-          const guessedId = isCorrect
-            ? media.ownerId
-            : currentPlayersList.find((other) => other.id !== media.ownerId)?.id || media.ownerId
-
-          const history = roundHistoryRef.current[currentRoundIndexRef.current]
-          if (history) {
-            history.answers[p.id] = {
-              guessedPlayerId: guessedId,
-              isCorrect,
-              responseTime: botDelay,
-            }
-          }
-        }, botDelay)
-      }
-    })
+    hostRoundControllerRef.current?.startRound(roundNum)
   }
 
-  // Step 3: Handle Timer Expiry & Auto-Advance after 3 seconds
   const handleRoundTimerExpire = () => {
-    if (!currentPlayer?.isHost || phase !== 'ACTIVE_ROUND') return
+    if (!stateRef.current.currentPlayer?.isHost || stateRef.current.phase !== 'ACTIVE_ROUND') return
 
     const media = mediaDeckRef.current[currentRoundIndexRef.current]
     if (!media) return
@@ -904,7 +1019,6 @@ export default function App() {
       answers: {},
     }
 
-    // Calculate scores for all players independently
     let fastestTime = 999999
     let fastestPlayerId = ''
 
@@ -920,7 +1034,6 @@ export default function App() {
       }
     > = {}
 
-    // Find fastest correct answer
     Object.entries(history.answers).forEach(([playerId, ans]) => {
       if (ans.isCorrect && ans.responseTime < fastestTime) {
         fastestTime = ans.responseTime
@@ -928,7 +1041,7 @@ export default function App() {
       }
     })
 
-    const updatedPlayers = players.map((p) => {
+    const updatedPlayers = stateRef.current.players.map((p) => {
       const ans = history.answers[p.id]
       if (ans && ans.isCorrect) {
         const scoreResult = calculateScore(
@@ -977,7 +1090,7 @@ export default function App() {
 
     setPlayers(updatedPlayers)
 
-    const fastestPlayer = players.find((p) => p.id === fastestPlayerId)
+    const fastestPlayer = stateRef.current.players.find((p) => p.id === fastestPlayerId)
 
     const roundResults = {
       correctPlayerId: media.ownerId,
@@ -986,7 +1099,7 @@ export default function App() {
     }
 
     setPhase('REVEAL')
-    const myResult = calculatedAnswers[currentPlayer.id]
+    const myResult = calculatedAnswers[stateRef.current.currentPlayer?.id || '']
     if (myResult) {
       if (myResult.isCorrect) playCorrect()
       else playWrong()
@@ -1009,14 +1122,12 @@ export default function App() {
       },
     })
 
-    // AUTOMATIC TRANSITION: Advance to Scoreboard after 3.5 seconds!
     clearAutoTimer()
     autoAdvanceTimerRef.current = setTimeout(() => {
       advanceToScoreboard(updatedPlayers)
     }, 3500)
   }
 
-  // Emergency Panic / Veto trigger
   const triggerVetoSequence = () => {
     clearAutoTimer()
     playPanic()
@@ -1028,40 +1139,25 @@ export default function App() {
       payload: { reason: 'CENSORED_BY_OWNER' },
     })
 
-    // Advance to next round automatically after 2.5s
     setTimeout(() => {
-      advanceToScoreboard(players)
+      advanceToScoreboard(stateRef.current.players)
     }, 2500)
   }
 
-  // Step 4: Advance to Leaderboard Race & Auto-Advance after 5 seconds
   const advanceToScoreboard = (currentPlayersList?: Player[]) => {
     clearAutoTimer()
-    const activePlayers = currentPlayersList || players
-    setPhase('LEADERBOARD')
-    setPlayers(activePlayers)
-
-    peerConnection.broadcast({
-      type: 'LEADERBOARD_VIEW',
-      senderId: peerConnection.peerId,
-      payload: { players: activePlayers },
-    })
-
-    // AUTOMATIC TRANSITION: Advance to Next Round after 5 seconds!
-    autoAdvanceTimerRef.current = setTimeout(() => {
-      currentRoundIndexRef.current++
-      runNextRound(activeRound.roundNumber + 1, activePlayers)
-    }, 5000)
+    const activePlayers = currentPlayersList || stateRef.current.players
+    hostRoundControllerRef.current?.enterLeaderboardBarrier(activeRound.roundNumber, activePlayers, 4000, 2000)
   }
 
-  // Manual fallback override if host wants to advance immediately
+ 
   const handleNextRoundFromLeaderboard = () => {
     clearAutoTimer()
     currentRoundIndexRef.current++
     runNextRound(activeRound.roundNumber + 1, players)
   }
 
-  // Restart / Play Again
+ 
   const handlePlayAgain = () => {
     clearAutoTimer()
     setPhase('LOBBY')
@@ -1084,7 +1180,7 @@ export default function App() {
     })
   }
 
-  // Gracefully leave game and clear persisted session
+ 
   const handleLeaveGame = () => {
     if (phase === 'ACTIVE_ROUND') return
     clearGameSession()
@@ -1095,13 +1191,14 @@ export default function App() {
     setLandingMode('SELECT')
   }
 
-  // --------------------------------------------------------------------------
-  // Player Interaction (Submit Guess & Veto)
-  // --------------------------------------------------------------------------
+ 
+ 
+ 
   const handleAnswerSubmit = (guessedPlayerId: string) => {
     if (activeRound.hasAnswered || activeRound.isVetoed) return
 
-    const responseTime = Date.now() - activeRound.startTime
+    const now = clockSync.now()
+    const responseTime = Math.max(0, now - activeRound.startTime)
     setActiveRound((prev) => ({
       ...prev,
       hasAnswered: true,
@@ -1111,7 +1208,6 @@ export default function App() {
     const myPlayerId = currentPlayer?.id || peerConnection.peerId
 
     if (currentPlayer?.isHost) {
-      // Record answer directly in host's round history
       const history = roundHistoryRef.current[currentRoundIndexRef.current]
       if (history) {
         history.answers[myPlayerId] = {
@@ -1121,12 +1217,32 @@ export default function App() {
         }
       }
     } else {
-      // Send answer with explicit playerId to host
+      const guessPayload: SubmitGuessPayload = {
+        roundId: activeRound.roundNumber,
+        playerId: myPlayerId,
+        selectedChoice: guessedPlayerId,
+        timestamp: now,
+        responseTime,
+      }
+      peerConnection.sendToHost({
+        type: 'SUBMIT_GUESS',
+        senderId: myPlayerId,
+        payload: guessPayload,
+      })
       peerConnection.sendToHost({
         type: 'ANSWER_SUBMITTED',
         senderId: myPlayerId,
         payload: { playerId: myPlayerId, guessedPlayerId, responseTime },
       })
+    }
+  }
+
+  const handleClientTimerExpire = () => {
+    if (!activeRound.hasAnswered && !activeRound.isVetoed) {
+      handleAnswerSubmit('')
+    }
+    if (currentPlayer?.isHost) {
+      handleRoundTimerExpire()
     }
   }
 
@@ -1142,12 +1258,12 @@ export default function App() {
     }
   }
 
-  // --------------------------------------------------------------------------
-  // Render Views
-  // --------------------------------------------------------------------------
+ 
+ 
+ 
   return (
     <div className="min-h-screen w-full bg-[#0d0b18] text-gray-100 flex flex-col justify-between selection:bg-violet-600 selection:text-white">
-      {/* Top Navigation Bar */}
+      {}
       <header className="w-full max-w-4xl mx-auto px-4 pt-3 sm:pt-5 pb-2 flex items-center justify-between z-30 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div
           onClick={handleLeaveGame}
@@ -1172,11 +1288,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content Area */}
+      {}
       <main className="w-full max-w-3xl mx-auto px-4 py-2 flex-1 flex flex-col justify-center">
-        {/* ==================================================================== */}
-        {/* 1. LANDING SCREEN */}
-        {/* ==================================================================== */}
+        {}
+        {}
+        {}
         {phase === 'LANDING' && (
           <div className="w-full max-w-md mx-auto space-y-6 py-6 animate-in fade-in duration-300">
             <div className="text-center space-y-2">
@@ -1192,7 +1308,7 @@ export default function App() {
               </p>
             </div>
 
-            {/* Mode Selector */}
+            {}
             {landingMode === 'SELECT' && (
               <div className="space-y-3">
                 <Button
@@ -1219,7 +1335,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Host Profile Setup */}
+            {}
             {(landingMode === 'HOST_SETUP' || landingMode === 'JOIN_SETUP') && (
               <Card glow="purple" className="space-y-4">
                 <h3 className="font-bold text-white text-base text-center">
@@ -1262,7 +1378,7 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Avatar emoji picker */}
+                {}
                 <div>
                   <label className="text-xs font-bold text-gray-300 uppercase tracking-wider block mb-1.5">
                     Choose Avatar
@@ -1284,7 +1400,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Color picker */}
+                {}
                 <div>
                   <label className="text-xs font-bold text-gray-300 uppercase tracking-wider block mb-1.5">
                     Choose Color
@@ -1340,13 +1456,13 @@ export default function App() {
           </div>
         )}
 
-        {/* ==================================================================== */}
-        {/* 2. LOBBY SCREEN */}
-        {/* ==================================================================== */}
+        {}
+        {}
+        {}
         {phase === 'LOBBY' && (
           <div className="w-full space-y-4 sm:space-y-6 py-2 sm:py-4 animate-in fade-in duration-300">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-6">
-              {/* Left Column: QR Code & Settings */}
+              {}
               <div className="md:col-span-5 space-y-3 sm:space-y-4">
                 <QRCodeDisplay roomCode={peerConnection.roomCode} />
 
@@ -1357,7 +1473,7 @@ export default function App() {
                 />
               </div>
 
-              {/* Right Column: Player List & Media Uploader */}
+              {}
               <div className="md:col-span-7 space-y-4">
                 <MediaUploader
                   onMediaReady={handleMediaContribute}
@@ -1368,10 +1484,10 @@ export default function App() {
                   userId={currentPlayer?.id || peerConnection.peerId}
                 />
 
-                {/* Player List */}
+                {}
                 <PlayerList players={players} currentPlayerId={currentPlayer?.id} />
 
-                {/* Host Control Actions */}
+                {}
                 {currentPlayer?.isHost && (
                   <div className="space-y-2 pt-2">
 
@@ -1395,9 +1511,9 @@ export default function App() {
           </div>
         )}
 
-        {/* ==================================================================== */}
-        {/* 3. 3-SECOND COUNTDOWN */}
-        {/* ==================================================================== */}
+        {}
+        {}
+        {}
         {phase === 'COUNTDOWN' && (
           <div className="w-full max-w-md mx-auto text-center space-y-4 py-16 animate-in zoom-in-90 duration-200">
             <div className="text-xs font-bold tracking-widest text-violet-400 uppercase">
@@ -1412,12 +1528,23 @@ export default function App() {
           </div>
         )}
 
-        {/* ==================================================================== */}
-        {/* 4. ACTIVE ROUND SCREEN */}
-        {/* ==================================================================== */}
+        {}
+        {}
+        {}
+        {phase === 'PRECACHE' && (
+          <div className="w-full max-w-md mx-auto text-center space-y-4 py-16 animate-in zoom-in-90 duration-200">
+            <div className="text-xs font-bold tracking-widest text-violet-400 uppercase">
+              SYNCHRONIZING ROUND...
+            </div>
+            <div className="w-12 h-12 mx-auto border-4 border-violet-500/30 border-t-violet-400 rounded-full animate-spin" />
+            <p className="text-sm text-gray-300">
+              {isPreloading ? 'Pre-caching party photos...' : 'Waiting for all devices to sync...'}
+            </p>
+          </div>
+        )}
+
         {phase === 'ACTIVE_ROUND' && activeRound.activeMedia && (
           <div className="w-full max-w-xl mx-auto space-y-2.5 sm:space-y-4 py-1 sm:py-2 animate-in fade-in duration-200">
-            {/* Round info & Timer Bar */}
             <div className="flex items-center justify-between text-xs text-gray-400 px-1">
               <span className="font-bold text-violet-300">
                 Round {activeRound.roundNumber} of {activeRound.totalRounds}
@@ -1430,11 +1557,11 @@ export default function App() {
             <TimerBar
               durationSec={activeRound.duration}
               startTime={activeRound.startTime}
-              onExpire={handleRoundTimerExpire}
+              endTime={activeRound.endTime}
+              onExpire={handleClientTimerExpire}
               isPaused={activeRound.isVetoed}
             />
 
-            {/* Media Viewer */}
             <MediaViewer
               media={activeRound.activeMedia}
               progressiveBlur={settings.progressiveBlur}
@@ -1444,6 +1571,10 @@ export default function App() {
               isHostTV={settings.tvMode && currentPlayer?.isHost}
               isMuted={isMuted}
             />
+
+            {activeRound.activeMedia.isOwner && !activeRound.isVetoed && (
+              <PanicButton onPanicVeto={handlePanicVetoClick} />
+            )}
 
             {(!settings.tvMode || !currentPlayer?.isHost) && !activeRound.isVetoed && (
               <PlayerGrid
@@ -1457,9 +1588,9 @@ export default function App() {
           </div>
         )}
 
-        {/* ==================================================================== */}
-        {/* 5. REVEAL SCREEN (Automatically advances to scoreboard in 3s) */}
-        {/* ==================================================================== */}
+        {}
+        {}
+        {}
         {phase === 'REVEAL' && activeRound.correctOwnerId && (
           <div className="w-full max-w-md mx-auto space-y-5 py-4 animate-in fade-in duration-200">
             <RevealCard
@@ -1475,9 +1606,9 @@ export default function App() {
           </div>
         )}
 
-        {/* ==================================================================== */}
-        {/* 6. LEADERBOARD SCREEN (Automatically advances to next round in 5s) */}
-        {/* ==================================================================== */}
+        {}
+        {}
+        {}
         {phase === 'LEADERBOARD' && (
           <div className="w-full max-w-lg mx-auto space-y-4 py-4 animate-in fade-in duration-200">
             <LeaderboardRace
@@ -1490,9 +1621,9 @@ export default function App() {
           </div>
         )}
 
-        {/* ==================================================================== */}
-        {/* 7. GAME OVER / PODIUM SCREEN */}
-        {/* ==================================================================== */}
+        {}
+        {}
+        {}
         {phase === 'GAME_OVER' && (
           <div className="w-full py-4 animate-in fade-in duration-300">
             <Podium
@@ -1505,7 +1636,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
+      {}
       <footer className="w-full max-w-4xl mx-auto px-4 py-3 text-center text-xs text-gray-500">
         <span>Photo Roulette • WebRTC P2P Party Game • Serverless on GitHub Pages</span>
       </footer>

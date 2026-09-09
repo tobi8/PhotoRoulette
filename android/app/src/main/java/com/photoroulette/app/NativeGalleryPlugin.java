@@ -236,20 +236,8 @@ public class NativeGalleryPlugin extends Plugin {
             int currentHeight = bitmap.getHeight();
             float scale = Math.min(1.0f, (float) maxDimension / Math.max(currentWidth, currentHeight));
 
-            float orientation = 0f;
-            try (InputStream exifStream = resolver.openInputStream(uri)) {
-                if (exifStream != null) {
-                    ExifInterface exif = new ExifInterface(exifStream);
-                    int orient = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
-                    if (orient == ExifInterface.ORIENTATION_ROTATE_90) orientation = 90f;
-                    else if (orient == ExifInterface.ORIENTATION_ROTATE_180) orientation = 180f;
-                    else if (orient == ExifInterface.ORIENTATION_ROTATE_270) orientation = 270f;
-                }
-            } catch (Exception ignored) {}
-
             Matrix matrix = new Matrix();
             if (scale < 1.0f) matrix.postScale(scale, scale);
-            if (orientation != 0f) matrix.postRotate(orientation);
 
             Bitmap scaledBitmap = Bitmap.createBitmap(bitmap, 0, 0, currentWidth, currentHeight, matrix, true);
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -305,14 +293,14 @@ public class NativeGalleryPlugin extends Plugin {
                     item.put("type", ref.isVideo ? "video" : "image");
 
                     if (ref.isVideo) {
-                        byte[] videoBytes = processVideo(ref.uri, 15 * 1024 * 1024);
+                        byte[] videoBytes = processVideo(ref.uri, 10 * 1024 * 1024);
                         if (videoBytes != null && videoBytes.length > 0) {
                             String base64 = Base64.encodeToString(videoBytes, Base64.NO_WRAP);
                             item.put("data", "data:video/mp4;base64," + base64);
                             results.put(item);
                         }
                     } else {
-                        byte[] imgBytes = compressImage(ref.uri, 800, 65);
+                        byte[] imgBytes = compressImage(ref.uri, 480, 50);
                         if (imgBytes != null && imgBytes.length > 0) {
                             String base64 = Base64.encodeToString(imgBytes, Base64.NO_WRAP);
                             item.put("data", "data:image/jpeg;base64," + base64);

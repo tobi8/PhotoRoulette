@@ -28,7 +28,6 @@ export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
     return () => clearInterval(interval)
   }, [autoAdvanceSeconds])
 
-  // Sort players descending by score
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score)
   const maxScore = Math.max(1, sortedPlayers[0]?.score || 1)
 
@@ -52,7 +51,6 @@ export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
         </div>
       </div>
 
-      {/* Players race bars */}
       <div className="space-y-3">
         {sortedPlayers.map((player, index) => {
           const rank = index + 1
@@ -60,9 +58,9 @@ export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
           const barWidth = Math.max(12, Math.round((player.score / maxScore) * 100))
 
           const rankColors = [
-            'bg-amber-400 text-black', // 1st
-            'bg-slate-300 text-black', // 2nd
-            'bg-amber-700 text-white', // 3rd
+            'bg-amber-400 text-black',
+            'bg-slate-300 text-black',
+            'bg-amber-700 text-white',
           ]
           const defaultRankColor = 'bg-white/10 text-gray-300'
 
@@ -75,7 +73,6 @@ export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
                     : 'bg-white/5 border-white/5'
                 }`}
               >
-                {/* Left: Rank & Info */}
                 <div className="flex items-center gap-3 z-10 min-w-0">
                   <div
                     className={`w-6 h-6 rounded-full font-mono text-xs font-black flex items-center justify-center shrink-0 ${
@@ -105,7 +102,6 @@ export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
                   </div>
                 </div>
 
-                {/* Right: Points */}
                 <div className="text-right z-10 shrink-0">
                   <div className="font-mono font-black text-sm text-white">
                     {player.score.toLocaleString()} pts
@@ -117,7 +113,6 @@ export const LeaderboardRace: React.FC<LeaderboardRaceProps> = ({
                   )}
                 </div>
 
-                {/* Background Progress Fill */}
                 <div
                   className={`absolute top-0 bottom-0 left-0 rounded-2xl opacity-20 transition-all duration-700 ease-out pointer-events-none ${
                     rank === 1

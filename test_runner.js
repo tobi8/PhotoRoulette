@@ -148,3 +148,55 @@ for (let trial = 0; trial < 10; trial++) {
 console.log('✅ Guaranteed photo 100% inclusion passed across 10 trials')
 
 console.log('🎉 All automated tests passed successfully!')
+
+import { HostRoundController } from './src/utils/hostRoundController.ts'
+import { clockSync } from './src/utils/clockSync.ts'
+
+clockSync.reset()
+clockSync.recordSample(1000, 1050, 1100)
+assert.strictEqual(clockSync.getOffset(), 0, 'Offset should be 0 for symmetric ping-pong')
+
+clockSync.reset()
+clockSync.recordSample(1000, 1250, 1100)
+assert.strictEqual(clockSync.getOffset(), 200, 'Offset should compensate 200ms skew')
+
+const hostDummyPlayers = [
+  { id: 'h1', name: 'Host', avatar: '👑', color: '#f00', isHost: true, isReady: true, score: 0, streak: 0, lastRoundPoints: 0, fastestAnswersCount: 0, mediaCount: 2 },
+  { id: 'g1', name: 'Guest', avatar: '🐱', color: '#0f0', isHost: false, isReady: true, score: 0, streak: 0, lastRoundPoints: 0, fastestAnswersCount: 0, mediaCount: 2 },
+]
+const hostDummyDeck = [
+  { id: 'm1', ownerId: 'h1', ownerName: 'Host', type: 'image', dataUrl: 'data:image/png;base64,abc' },
+  { id: 'm2', ownerId: 'g1', ownerName: 'Guest', type: 'image', dataUrl: 'data:image/png;base64,def' },
+]
+
+let testPreloadSent = false
+let testStartSent = false
+let testStartPayload = null
+
+const testController = new HostRoundController({
+  onPreloadBroadcast: (p) => {
+    testPreloadSent = true
+  },
+  onRoundStartBroadcast: (p) => {
+    testStartSent = true
+    testStartPayload = p
+  },
+  onRoundExpire: () => {},
+  onLeaderboardBroadcast: () => {},
+  onAdvanceToNextRound: () => {},
+  onGameOver: () => {},
+})
+
+testController.initGame(hostDummyDeck, hostDummyPlayers, 5, 2, false)
+testController.startRound(1)
+assert.strictEqual(testController.getPhase(), 'PRECACHE', 'Should enter PRECACHE phase first')
+assert.strictEqual(testPreloadSent, true, 'Preload payload should be dispatched')
+assert.strictEqual(testStartSent, false, 'Start should wait until asset pre-cache acknowledged')
+
+testController.handleClientPreloadAck(1, 'g1')
+assert.strictEqual(testController.getPhase(), 'ROUND_ACTIVE', 'Should enter ROUND_ACTIVE after peers ack')
+assert.strictEqual(testStartSent, true, 'Round start dispatched with future endTime')
+assert.ok(testStartPayload.endTime > testStartPayload.startTime, 'endTime must be in future')
+
+testController.cleanup()
+console.log('✅ Host-authoritative barrier architecture & clock skew unit tests passed')

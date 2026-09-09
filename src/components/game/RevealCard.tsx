@@ -69,7 +69,6 @@ export const RevealCard: React.FC<RevealCardProps> = ({
         PHOTO OWNER REVEALED
       </div>
 
-      {/* Owner highlight */}
       <div className="flex flex-col items-center justify-center gap-2">
         <div className="relative">
           <Avatar
@@ -90,7 +89,6 @@ export const RevealCard: React.FC<RevealCardProps> = ({
         </p>
       </div>
 
-      {/* Your Personal Guess & Score Result */}
       {myAnswer && (
         <div
           className={`p-3.5 rounded-2xl border text-left flex items-center justify-between ${
@@ -132,7 +130,6 @@ export const RevealCard: React.FC<RevealCardProps> = ({
         </div>
       )}
 
-      {/* Fastest Guesser callout */}
       {fastestPlayer && (
         <div className="bg-white/5 rounded-xl p-2.5 flex items-center justify-center gap-2 text-xs text-amber-300 font-semibold border border-amber-500/20">
           <Zap size={14} className="text-amber-400 shrink-0" />
@@ -143,7 +140,6 @@ export const RevealCard: React.FC<RevealCardProps> = ({
         </div>
       )}
 
-      {/* Who Guessed Whom Breakdown */}
       {results && results.answers && Object.keys(results.answers).length > 0 && (
         <div className="pt-2 border-t border-white/10 text-left">
           <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
@@ -191,7 +187,6 @@ export const RevealCard: React.FC<RevealCardProps> = ({
         </div>
       )}
 
-      {/* Auto-Advance countdown banner */}
       <div className="pt-2 flex items-center justify-center gap-2 text-xs text-gray-400">
         <Clock size={13} className="text-violet-400 animate-spin" />
         <span>

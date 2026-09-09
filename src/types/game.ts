@@ -35,17 +35,19 @@ export interface ExcludedMediaItem {
 }
 
 export interface GameSettings {
-  roundDuration: number // 3, 5, 8, 10 seconds
-  totalRounds: number   // 10, 15, 20
+  roundDuration: number
+  totalRounds: number
   mediaType: 'photos_only' | 'videos_only' | 'mixed'
-  progressiveBlur: boolean // Sharpen over time vs instant reveal
-  tvMode: boolean       // Host operates as TV/Big screen board
+  progressiveBlur: boolean
+  tvMode: boolean
 }
+
 
 export type GamePhase =
   | 'LANDING'
   | 'LOBBY'
   | 'COUNTDOWN'
+  | 'PRECACHE'
   | 'ACTIVE_ROUND'
   | 'REVEAL'
   | 'LEADERBOARD'
@@ -58,12 +60,13 @@ export interface ActiveRoundState {
     id: string
     type: 'image' | 'video'
     dataUrl: string
-    isOwner: boolean // true if current player owns it (enables Panic Button)
+    isOwner: boolean
   } | null
   correctOwnerId?: string
   correctOwnerName?: string
   duration: number
   startTime: number
+  endTime?: number
   isVetoed: boolean
   hasAnswered: boolean
   selectedPlayerId?: string
@@ -81,6 +84,7 @@ export interface ActiveRoundState {
   }
 }
 
+
 export type MessageType =
   | 'JOIN_REQUEST'
   | 'JOIN_ACCEPTED'
@@ -90,11 +94,16 @@ export type MessageType =
   | 'SETTINGS_UPDATE'
   | 'STATE_SYNC'
   | 'ROUND_COUNTDOWN'
+  | 'ROUND_PRELOAD'
+  | 'CLIENT_PRELOAD_ACK'
   | 'ROUND_START'
+  | 'SUBMIT_GUESS'
   | 'ANSWER_SUBMITTED'
   | 'PANIC_VETO'
   | 'VETO_TRIGGERED'
   | 'ROUND_END'
+  | 'LEADERBOARD_BARRIER_SYNC'
+  | 'LEADERBOARD_READY_ACK'
   | 'LEADERBOARD_VIEW'
   | 'GAME_OVER'
   | 'PLAY_AGAIN'
@@ -108,3 +117,57 @@ export interface PeerMessage {
   payload: any
   timestamp?: number
 }
+
+export interface RoundPreloadPayload {
+  roundNumber: number
+  totalRounds: number
+  duration: number
+  media: {
+    id: string
+    type: 'image' | 'video'
+    dataUrl: string
+    ownerId: string
+  }
+}
+
+export interface ClientPreloadAckPayload {
+  roundNumber: number
+  playerId: string
+  success: boolean
+}
+
+export interface RoundStartPayload {
+  roundNumber: number
+  totalRounds: number
+  duration: number
+  startTime: number
+  endTime: number
+  media: {
+    id: string
+    type: 'image' | 'video'
+    dataUrl: string
+    ownerId: string
+  }
+  progressiveBlur?: boolean
+}
+
+export interface SubmitGuessPayload {
+  roundId: number
+  playerId: string
+  selectedChoice: string
+  timestamp: number
+  responseTime: number
+}
+
+export interface LeaderboardSyncPayload {
+  roundNumber: number
+  totalRounds: number
+  players: Player[]
+  barrierDurationMs: number
+}
+
+export interface LeaderboardReadyAckPayload {
+  roundNumber: number
+  playerId: string
+}
+

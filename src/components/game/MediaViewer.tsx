@@ -74,7 +74,6 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
         )
       ) : null}
 
-      {/* Veto / Censored Overlay */}
       {isVetoed && (
         <div className="absolute inset-0 bg-red-950/95 border-4 border-red-600 flex flex-col items-center justify-center p-6 text-center animate-in zoom-in-95 duration-150 z-20">
           <div className="p-4 bg-red-600 rounded-full text-white mb-3 animate-bounce shadow-2xl shadow-red-500">

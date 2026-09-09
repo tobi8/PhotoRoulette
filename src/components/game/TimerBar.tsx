@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { clockSync } from '../../utils/clockSync'
 
 interface TimerBarProps {
   durationSec: number
   startTime: number
+  endTime?: number
   onExpire?: () => void
   isPaused?: boolean
 }
@@ -10,36 +12,83 @@ interface TimerBarProps {
 export const TimerBar: React.FC<TimerBarProps> = ({
   durationSec,
   startTime,
+  endTime,
   onExpire,
   isPaused = false,
 }) => {
-  const [timeLeftMs, setTimeLeftMs] = useState(durationSec * 1000)
+  const barRef = useRef<HTMLDivElement>(null)
+  const targetEndTime = endTime || startTime + durationSec * 1000
+  const totalDurationMs = durationSec * 1000
+  const onExpireRef = useRef(onExpire)
+  onExpireRef.current = onExpire
+
+  const [secondsDisplay, setSecondsDisplay] = useState(() => {
+    const initialRemaining = Math.max(0, targetEndTime - clockSync.now())
+    return (initialRemaining / 1000).toFixed(1)
+  })
+  const [pointsDisplay, setPointsDisplay] = useState(() => {
+    const initialRemaining = Math.max(0, targetEndTime - clockSync.now())
+    const fraction = totalDurationMs > 0 ? initialRemaining / totalDurationMs : 0
+    return Math.round(500 + 500 * Math.max(0, Math.min(1, fraction)))
+  })
+  const [isUrgent, setIsUrgent] = useState(false)
 
   useEffect(() => {
-    if (isPaused) return
-
-    const totalMs = durationSec * 1000
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - startTime
-      const remaining = Math.max(0, totalMs - elapsed)
-      setTimeLeftMs(remaining)
-
-      if (remaining <= 0) {
-        clearInterval(interval)
-        onExpire?.()
+    if (isPaused) {
+      if (barRef.current) {
+        const computed = window.getComputedStyle(barRef.current)
+        const currentWidth = computed.getPropertyValue('width')
+        barRef.current.style.transition = 'none'
+        barRef.current.style.width = currentWidth
       }
-    }, 100)
+      return
+    }
 
-    return () => clearInterval(interval)
-  }, [durationSec, startTime, isPaused, onExpire])
+    const now = clockSync.now()
+    const remainingMs = Math.max(0, targetEndTime - now)
+    const initialPercent = totalDurationMs > 0 ? Math.min(100, Math.max(0, (remainingMs / totalDurationMs) * 100)) : 0
 
-  const totalMs = durationSec * 1000
-  const progressPercent = Math.max(0, Math.min(100, (timeLeftMs / totalMs) * 100))
-  const secondsLeft = (timeLeftMs / 1000).toFixed(1)
-  const isUrgent = timeLeftMs <= 2000
+    if (barRef.current) {
+      barRef.current.style.transition = 'none'
+      barRef.current.style.width = `${initialPercent}%`
+      void barRef.current.offsetWidth
 
-  // Points decay estimate: 1000 down to 500
-  const currentPointsEst = Math.round(500 + 500 * (timeLeftMs / totalMs))
+      if (remainingMs > 0) {
+        barRef.current.style.transition = `width ${remainingMs}ms linear`
+        barRef.current.style.width = '0%'
+      } else {
+        barRef.current.style.width = '0%'
+      }
+    }
+
+    let hasExpired = false
+    let animationFrameId: number
+
+    const tick = () => {
+      const currentNow = clockSync.now()
+      const currentRemaining = Math.max(0, targetEndTime - currentNow)
+      const fraction = totalDurationMs > 0 ? currentRemaining / totalDurationMs : 0
+
+      setSecondsDisplay((currentRemaining / 1000).toFixed(1))
+      setPointsDisplay(Math.round(500 + 500 * Math.max(0, Math.min(1, fraction))))
+      setIsUrgent(currentRemaining <= 2000)
+
+      if (currentRemaining <= 0) {
+        if (!hasExpired) {
+          hasExpired = true
+          onExpireRef.current?.()
+        }
+      } else {
+        animationFrameId = requestAnimationFrame(tick)
+      }
+    }
+
+    animationFrameId = requestAnimationFrame(tick)
+
+    return () => {
+      cancelAnimationFrame(animationFrameId)
+    }
+  }, [targetEndTime, totalDurationMs, isPaused])
 
   return (
     <div className="w-full space-y-1">
@@ -49,24 +98,22 @@ export const TimerBar: React.FC<TimerBarProps> = ({
             isUrgent ? 'text-red-400 animate-pulse text-sm' : 'text-violet-300'
           }`}
         >
-          ⏱️ {secondsLeft}s
+          ⏱️ {secondsDisplay}s
         </span>
         <span className="text-amber-400">
-          +{currentPointsEst} pts
+          +{pointsDisplay} pts
         </span>
       </div>
 
-      {/* Bar container */}
       <div className="w-full h-3 bg-black/50 rounded-full overflow-hidden border border-white/10 p-0.5">
         <div
-          className={`h-full rounded-full transition-all duration-100 ease-linear ${
+          ref={barRef}
+          className={`h-full rounded-full ${
             isUrgent
               ? 'bg-gradient-to-r from-red-600 to-rose-500 shadow-[0_0_12px_rgba(239,68,68,0.8)]'
-              : progressPercent < 50
-              ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
               : 'bg-gradient-to-r from-violet-500 via-pink-500 to-indigo-500'
           }`}
-          style={{ width: `${progressPercent}%` }}
+          style={{ width: '100%', willChange: 'width' }}
         />
       </div>
     </div>
