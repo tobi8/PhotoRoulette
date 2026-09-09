@@ -14,12 +14,10 @@ export interface Player {
 
 export interface MediaItem {
   id: string
-  mediaId?: string
   ownerId: string
   ownerName: string
   type: 'image' | 'video'
   dataUrl: string
-  data?: string
   previewUrl?: string
   aspectRatio?: number
   duration?: number
@@ -44,6 +42,7 @@ export interface GameSettings {
   tvMode: boolean
 }
 
+
 export type GamePhase =
   | 'LANDING'
   | 'LOBBY'
@@ -61,7 +60,7 @@ export interface ActiveRoundState {
     id: string
     type: 'image' | 'video'
     dataUrl: string
-    isOwner?: boolean
+    isOwner: boolean
   } | null
   correctOwnerId?: string
   correctOwnerName?: string
@@ -73,26 +72,23 @@ export interface ActiveRoundState {
   selectedPlayerId?: string
   results?: {
     correctPlayerId: string
-    answers: Record<
-      string,
-      {
-        guessedPlayerId: string
-        isCorrect: boolean
-        points: number
-        responseTime: number
-        newTotal: number
-        streak: number
-      }
-    >
+    answers: Record<string, {
+      guessedPlayerId: string
+      isCorrect: boolean
+      points: number
+      responseTime: number
+      newTotal: number
+      streak: number
+    }>
     fastestGuesserId?: string
   }
 }
+
 
 export type MessageType =
   | 'JOIN_REQUEST'
   | 'JOIN_ACCEPTED'
   | 'JOIN_REJECTED'
-  | 'MEDIA_SUBMISSION'
   | 'MEDIA_CONTRIBUTION'
   | 'PLAYER_READY'
   | 'SETTINGS_UPDATE'
@@ -105,7 +101,6 @@ export type MessageType =
   | 'ANSWER_SUBMITTED'
   | 'PLAYER_KICKED'
   | 'ROUND_END'
-  | 'ROUND_RESULT'
   | 'LEADERBOARD_BARRIER_SYNC'
   | 'LEADERBOARD_READY_ACK'
   | 'LEADERBOARD_VIEW'
@@ -122,21 +117,6 @@ export interface PeerMessage {
   timestamp?: number
 }
 
-export interface MediaSubmissionPayload {
-  playerId: string
-  playerName: string
-  items: string[]
-  rawItems?: Array<{
-    id?: string
-    mediaId?: string
-    type?: 'image' | 'video'
-    dataUrl?: string
-    data?: string
-    isGuaranteed?: boolean
-  }>
-  isInitialBatch?: boolean
-}
-
 export interface RoundPreloadPayload {
   roundNumber: number
   totalRounds: number
@@ -145,8 +125,7 @@ export interface RoundPreloadPayload {
     id: string
     type: 'image' | 'video'
     dataUrl: string
-    ownerId?: string
-    ownerName?: string
+    ownerId: string
   }
 }
 
@@ -166,34 +145,9 @@ export interface RoundStartPayload {
     id: string
     type: 'image' | 'video'
     dataUrl: string
-    ownerId?: string
-    ownerName?: string
+    ownerId: string
   }
   progressiveBlur?: boolean
-}
-
-export interface RoundResultPayload {
-  roundNumber?: number
-  correctOwnerId: string
-  correctOwnerName: string
-  scores?: Record<string, number>
-  results: {
-    correctPlayerId: string
-    answers: Record<
-      string,
-      {
-        guessedPlayerId: string
-        isCorrect: boolean
-        points: number
-        responseTime: number
-        newTotal: number
-        streak: number
-      }
-    >
-    fastestGuesserId?: string
-  }
-  updatedPlayers?: Player[]
-  fastestPlayer?: Player
 }
 
 export interface SubmitGuessPayload {

@@ -4,9 +4,7 @@ import { Player } from '../../types/game'
 import { Avatar } from '../ui/Avatar'
 
 interface RevealCardProps {
-  correctPlayer?: Player
-  correctOwnerId?: string
-  correctOwnerName?: string
+  correctPlayer: Player
   players: Player[]
   results?: {
     correctPlayerId: string
@@ -30,8 +28,6 @@ interface RevealCardProps {
 
 export const RevealCard: React.FC<RevealCardProps> = ({
   correctPlayer,
-  correctOwnerId,
-  correctOwnerName,
   players,
   results,
   currentPlayerId,
@@ -67,11 +63,6 @@ export const RevealCard: React.FC<RevealCardProps> = ({
     ? (results.answers[results.fastestGuesserId].responseTime / 1000).toFixed(2)
     : undefined
 
-  const ownerPlayer = (correctOwnerId ? players.find((p) => p.id === correctOwnerId) : undefined) || correctPlayer
-  const ownerName = correctOwnerName || ownerPlayer?.name || 'Player'
-  const ownerAvatar = ownerPlayer?.avatar || '🎭'
-  const ownerColor = ownerPlayer?.color || '#8b5cf6'
-
   return (
     <div className="w-full bg-[#171527] border border-violet-500/30 rounded-3xl p-5 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-center">
       <div className="text-xs font-bold tracking-widest text-violet-400 uppercase">
@@ -81,8 +72,8 @@ export const RevealCard: React.FC<RevealCardProps> = ({
       <div className="flex flex-col items-center justify-center gap-2">
         <div className="relative">
           <Avatar
-            avatar={ownerAvatar}
-            color={ownerColor}
+            avatar={correctPlayer.avatar}
+            color={correctPlayer.color}
             size={isHostTV ? 'xl' : 'lg'}
           />
           <div className="absolute -top-2 -right-2 p-1 bg-amber-400 text-black rounded-full shadow-lg">
@@ -91,10 +82,10 @@ export const RevealCard: React.FC<RevealCardProps> = ({
         </div>
 
         <div className="text-2xl sm:text-3xl font-black text-white">
-          {ownerName}
+          {correctPlayer.name}
         </div>
         <p className="text-xs text-gray-400">
-          This photo was taken by <strong>{ownerName}</strong>!
+          This photo was taken by <strong>{correctPlayer.name}</strong>!
         </p>
       </div>
 

@@ -68,6 +68,7 @@ export class HostRoundController {
         id: media.id,
         type: media.type,
         dataUrl: media.dataUrl,
+        ownerId: media.ownerId,
       },
     }
 
@@ -155,6 +156,7 @@ export class HostRoundController {
         id: media.id,
         type: media.type,
         dataUrl: media.dataUrl,
+        ownerId: media.ownerId,
       },
       progressiveBlur: this.progressiveBlur,
     }
@@ -198,6 +200,7 @@ export class HostRoundController {
             id: nextMedia.id,
             type: nextMedia.type,
             dataUrl: nextMedia.dataUrl,
+            ownerId: nextMedia.ownerId,
           },
         }
         this.callbacks.onPreloadBroadcast(preloadPayload)
@@ -275,19 +278,5 @@ export class HostRoundController {
 
   public getCurrentRoundIndex(): number {
     return this.currentRoundIndex
-  }
-
-  public getCurrentSecret(): { currentRound: number; correctOwnerId: string; correctOwnerName: string } | null {
-    const media = this.deck[this.currentRoundIndex]
-    if (!media) return null
-    return {
-      currentRound: this.currentRoundIndex + 1,
-      correctOwnerId: media.ownerId,
-      correctOwnerName: media.ownerName,
-    }
-  }
-
-  public getCurrentMedia(): MediaItem | null {
-    return this.deck[this.currentRoundIndex] || null
   }
 }
