@@ -25,7 +25,7 @@ import {
   getMockPartyDeck,
   MOCK_BOT_PLAYERS,
 } from './utils/mockData'
-import { buildBalancedRouletteDeck } from './utils/deckBuilder'
+import { buildBalancedRouletteDeck, buildAggregatedPool } from './utils/deckBuilder'
 
 import { Button } from './components/ui/Button'
 import { Card } from './components/ui/Card'
@@ -114,6 +114,8 @@ export default function App() {
 
  
   const mediaDeckRef = useRef<MediaItem[]>([])
+  const playerSubmissionsRef = useRef<Map<string, MediaItem[]>>(new Map())
+  const isUploadingMediaRef = useRef<boolean>(false)
   const roundHistoryRef = useRef<
     Array<{
       roundNumber: number
@@ -253,35 +255,37 @@ export default function App() {
           break
         }
 
-       
         case 'MEDIA_CONTRIBUTION': {
           if (!stateRef.current.currentPlayer?.isHost) return
-          const items: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }> = payload.items || []
+          const items: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; isGuaranteed?: boolean }> = payload.items || []
           const contributorId = payload.playerId || fromPeerId
-          const isInitial = payload.isInitialBatch ?? true
+          const isInitial = payload.isInitialBatch ?? (payload.batchIndex === 0)
+          const contributorName = stateRef.current.players.find((p) => p.id === contributorId)?.name || 'Player'
 
-          const mapped: MediaItem[] = items.map((item) => ({
-            ...item,
+          const mapped: MediaItem[] = items.map((item, idx) => ({
+            id: item.id || `${contributorId}_${Date.now()}_${idx}`,
+            type: item.type || 'image',
+            dataUrl: item.dataUrl,
             ownerId: contributorId,
-            ownerName: stateRef.current.players.find((p) => p.id === contributorId)?.name || 'Player',
+            ownerName: contributorName,
+            isGuaranteed: Boolean(item.isGuaranteed),
           }))
 
-          if (isInitial) {
-           
-            mediaDeckRef.current = [
-              ...mediaDeckRef.current.filter((m) => m.ownerId !== contributorId),
-              ...mapped,
-            ]
+          const existing = playerSubmissionsRef.current.get(contributorId) || []
+          let updatedList: MediaItem[]
+          if (isInitial && (!existing.length || payload.batchIndex === 0)) {
+            updatedList = [...mapped]
           } else {
-           
-            const existingIds = new Set(mediaDeckRef.current.map((m) => m.id))
+            const existingIds = new Set(existing.map((m) => m.id))
             const newItems = mapped.filter((m) => !existingIds.has(m.id))
-            mediaDeckRef.current = [...mediaDeckRef.current, ...newItems]
+            updatedList = [...existing, ...newItems]
           }
 
-          const currentCount = mediaDeckRef.current.filter((m) => m.ownerId === contributorId).length
+          playerSubmissionsRef.current.set(contributorId, updatedList)
+          mediaDeckRef.current = buildAggregatedPool(playerSubmissionsRef.current)
 
-         
+          const currentCount = updatedList.length
+
           setPlayers((prev) => {
             const updated = prev.map((p) => (p.id === contributorId ? { ...p, mediaCount: currentCount } : p))
             peerConnection.broadcast({
@@ -471,6 +475,7 @@ export default function App() {
           setActiveRound((prev) => ({
             ...prev,
             correctOwnerId: payload.correctPlayerId,
+            correctOwnerName: payload.correctOwnerName,
             results: payload.results,
           }))
 
@@ -514,6 +519,8 @@ export default function App() {
   )
 
   const handlePeerDisconnected = useCallback((disconnectedId: string) => {
+    playerSubmissionsRef.current.delete(disconnectedId)
+    mediaDeckRef.current = buildAggregatedPool(playerSubmissionsRef.current)
     setPlayers((prev) => prev.filter((p) => p.id !== disconnectedId))
   }, [])
 
@@ -705,7 +712,8 @@ export default function App() {
       ownerId: botId,
       ownerName: botTemplate.name,
     }))
-    mediaDeckRef.current = [...mediaDeckRef.current, ...botRawMedia]
+    playerSubmissionsRef.current.set(botId, botRawMedia)
+    mediaDeckRef.current = buildAggregatedPool(playerSubmissionsRef.current)
 
     const newBot: Player = {
       ...botTemplate,
@@ -741,47 +749,54 @@ export default function App() {
     })
   }
 
- 
-  const handleMediaContribute = (items: Array<{ id: string; type: 'image' | 'video'; dataUrl: string }>) => {
-    const myId = currentPlayer?.id || peerConnection.peerId
+  const handleMediaContribute = useCallback(
+    (items: Array<{ id: string; type: 'image' | 'video'; dataUrl: string; isGuaranteed?: boolean }>) => {
+      const myId = currentPlayer?.id || peerConnection.peerId
 
-    if (currentPlayer?.isHost) {
-     
-      const hostItems: MediaItem[] = items.map((i) => ({
-        ...i,
-        ownerId: myId,
-        ownerName: currentPlayer?.name || 'Host',
-      }))
-      mediaDeckRef.current = [
-        ...mediaDeckRef.current.filter((m) => m.ownerId !== myId),
-        ...hostItems,
-      ]
-      setPlayers((prev) =>
-        prev.map((p) => (p.id === myId ? { ...p, mediaCount: items.length } : p))
-      )
-    } else {
-     
-      const BATCH_SIZE = 2
-      const sendBatches = async () => {
-        for (let i = 0; i < items.length; i += BATCH_SIZE) {
-          const batch = items.slice(i, i + BATCH_SIZE)
-          peerConnection.sendToHost({
-            type: 'MEDIA_CONTRIBUTION',
-            senderId: myId,
-            payload: {
-              playerId: myId,
-              items: batch,
-              isInitialBatch: i === 0,
-            },
-          })
-          if (i + BATCH_SIZE < items.length) {
-            await new Promise((resolve) => setTimeout(resolve, 35))
+      if (currentPlayer?.isHost) {
+        const hostItems: MediaItem[] = items.map((i, idx) => ({
+          ...i,
+          id: i.id || `${myId}_${Date.now()}_${idx}`,
+          ownerId: myId,
+          ownerName: currentPlayer?.name || 'Host',
+          isGuaranteed: Boolean(i.isGuaranteed),
+        }))
+        playerSubmissionsRef.current.set(myId, hostItems)
+        mediaDeckRef.current = buildAggregatedPool(playerSubmissionsRef.current)
+        setPlayers((prev) =>
+          prev.map((p) => (p.id === myId ? { ...p, mediaCount: items.length } : p))
+        )
+      } else {
+        const BATCH_SIZE = 2
+        const sendBatches = async () => {
+          if (isUploadingMediaRef.current) return
+          isUploadingMediaRef.current = true
+          try {
+            const totalBatches = Math.ceil(items.length / BATCH_SIZE)
+            for (let i = 0; i < items.length; i += BATCH_SIZE) {
+              const batch = items.slice(i, i + BATCH_SIZE)
+              const batchIndex = Math.floor(i / BATCH_SIZE)
+              await peerConnection.sendToHost({
+                type: 'MEDIA_CONTRIBUTION',
+                senderId: myId,
+                payload: {
+                  playerId: myId,
+                  items: batch,
+                  batchIndex,
+                  totalBatches,
+                  isInitialBatch: i === 0,
+                },
+              })
+            }
+          } finally {
+            isUploadingMediaRef.current = false
           }
         }
+        sendBatches()
       }
-      sendBatches()
-    }
-  }
+    },
+    [currentPlayer?.id, currentPlayer?.isHost, currentPlayer?.name, peerConnection]
+  )
 
   const handleToggleReady = () => {
     const nextReady = !isReady
@@ -936,8 +951,13 @@ export default function App() {
   const startFullGame = () => {
     clearAutoTimer()
 
+    const poolSource =
+      playerSubmissionsRef.current.size > 0
+        ? playerSubmissionsRef.current
+        : mediaDeckRef.current
+
     const currentDeck = buildBalancedRouletteDeck(
-      mediaDeckRef.current,
+      poolSource,
       players,
       settings.mediaType,
       settings.totalRounds || 10
@@ -1084,8 +1104,14 @@ export default function App() {
 
     const fastestPlayer = stateRef.current.players.find((p) => p.id === fastestPlayerId)
 
+    const correctOwnerId = media.ownerId
+    const correctOwnerName =
+      media.ownerName ||
+      stateRef.current.players.find((p) => p.id === correctOwnerId)?.name ||
+      'Player'
+
     const roundResults = {
-      correctPlayerId: media.ownerId,
+      correctPlayerId: correctOwnerId,
       answers: calculatedAnswers,
       fastestGuesserId: fastestPlayerId,
     }
@@ -1099,7 +1125,8 @@ export default function App() {
 
     setActiveRound((prev) => ({
       ...prev,
-      correctOwnerId: media.ownerId,
+      correctOwnerId,
+      correctOwnerName,
       results: roundResults,
     }))
 
@@ -1107,7 +1134,8 @@ export default function App() {
       type: 'ROUND_END',
       senderId: peerConnection.peerId,
       payload: {
-        correctPlayerId: media.ownerId,
+        correctPlayerId: correctOwnerId,
+        correctOwnerName,
         results: roundResults,
         updatedPlayers,
         fastestPlayer,
@@ -1173,7 +1201,8 @@ export default function App() {
   const handleRemovePlayer = (targetPlayerId: string) => {
     if (!currentPlayer?.isHost || targetPlayerId === currentPlayer.id) return
 
-    mediaDeckRef.current = mediaDeckRef.current.filter((m) => m.ownerId !== targetPlayerId)
+    playerSubmissionsRef.current.delete(targetPlayerId)
+    mediaDeckRef.current = buildAggregatedPool(playerSubmissionsRef.current)
 
     peerConnection.sendToPeer(targetPlayerId, {
       type: 'PLAYER_KICKED',
@@ -1567,12 +1596,16 @@ export default function App() {
         {}
         {}
         {}
-        {phase === 'REVEAL' && activeRound.correctOwnerId && (
+        {phase === 'REVEAL' && (activeRound.correctOwnerId || activeRound.correctOwnerName) && (
           <div className="w-full max-w-md mx-auto space-y-5 py-4 animate-in fade-in duration-200">
             <RevealCard
               correctPlayer={
-                players.find((p) => p.id === activeRound.correctOwnerId) || players[0]
+                players.find((p) => p.id === activeRound.correctOwnerId) ||
+                (activeRound.correctOwnerName
+                  ? players.find((p) => p.name.toLowerCase() === activeRound.correctOwnerName?.toLowerCase())
+                  : undefined)
               }
+              correctOwnerName={activeRound.correctOwnerName}
               players={players}
               results={activeRound.results}
               currentPlayerId={currentPlayer?.id}

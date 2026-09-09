@@ -107,7 +107,7 @@ assert.strictEqual(isMediaFile('notes.pdf'), false, 'Should reject .pdf')
 console.log('✅ File extension & hidden file filtering passed')
 
 // 6. Test Balanced Multi-Player Roulette Deck Generation (No Host Dominance)
-import { buildBalancedRouletteDeck, fisherYatesShuffle } from './src/utils/deckBuilder.ts'
+import { buildBalancedRouletteDeck, buildAggregatedPool, fisherYatesShuffle } from './src/utils/deckBuilder.ts'
 
 const testPlayersList = [
   { id: 'host', name: 'Host', avatar: '👑', color: '#ff0055', isHost: true, isReady: true, score: 0, streak: 0, lastRoundPoints: 0, fastestAnswersCount: 0, mediaCount: 30 },
@@ -145,7 +145,23 @@ for (let trial = 0; trial < 10; trial++) {
   const resultDeck = buildBalancedRouletteDeck(deckWithGuaranteed, testPlayersList.slice(0, 2), 'photos_only', 10)
   assert.ok(resultDeck.some((m) => m.id === 'b_guaranteed'), 'Guaranteed photo must 100% appear in the deck')
 }
-console.log('✅ Guaranteed photo 100% inclusion passed across 10 trials')
+const submissionsMap = new Map()
+submissionsMap.set('host', Array.from({ length: 20 }, (_, i) => ({ id: `host_${i}`, type: 'image', dataUrl: 'data:image/jpeg;base64,123', ownerId: 'host', ownerName: 'Host' })))
+submissionsMap.set('guest', Array.from({ length: 20 }, (_, i) => ({ id: `guest_${i}`, type: 'image', dataUrl: 'data:image/jpeg;base64,456', ownerId: 'guest', ownerName: 'Guest' })))
+
+const aggregatedPool = buildAggregatedPool(submissionsMap)
+assert.strictEqual(aggregatedPool.length, 40, 'Aggregated pool should contain all 40 items')
+
+const mapDeck = buildBalancedRouletteDeck(submissionsMap, [testPlayersList[0], testPlayersList[1]], 'photos_only', 10)
+assert.strictEqual(mapDeck.length, 10, 'Deck built from submissions map should have 10 rounds')
+
+const mapOwnerCounts = {}
+for (const item of mapDeck) {
+  mapOwnerCounts[item.ownerId] = (mapOwnerCounts[item.ownerId] || 0) + 1
+}
+assert.strictEqual(mapOwnerCounts['host'], 5, 'Host should have exactly 5 rounds in balanced 2-player deck')
+assert.strictEqual(mapOwnerCounts['guest'], 5, 'Guest should have exactly 5 rounds in balanced 2-player deck')
+console.log('✅ Multi-player Map submission aggregation & balanced deck passed')
 
 console.log('🎉 All automated tests passed successfully!')
 

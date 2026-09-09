@@ -34,7 +34,8 @@ export function usePeerConnection(
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map())
   const hostConnectionRef = useRef<DataConnection | null>(null)
 
-  const chunkBuffersRef = useRef<Map<string, { received: Map<number, string>; total: number }>>(new Map())
+  const chunkBuffersRef = useRef<Map<string, { received: Map<number, string>; total: number; timestamp: number }>>(new Map())
+  const sendQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
 
   const messageHandlerRef = useRef(onMessageReceived)
   messageHandlerRef.current = onMessageReceived
@@ -42,56 +43,75 @@ export function usePeerConnection(
   const disconnectHandlerRef = useRef(onPeerDisconnected)
   disconnectHandlerRef.current = onPeerDisconnected
 
-  const sendThroughConnection = useCallback(async (conn: DataConnection, message: PeerMessage) => {
+  const sendThroughConnection = useCallback(async (conn: DataConnection, message: PeerMessage): Promise<void> => {
     if (!conn || !conn.open) return
 
-    const serialized = JSON.stringify(message)
-    if (serialized.length > CHUNK_SIZE) {
-      const chunkId = `chunk-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-      const total = Math.ceil(serialized.length / CHUNK_SIZE)
-      for (let i = 0; i < total; i++) {
-        if (!conn.open) return
-        const dc = (conn as any).dataChannel as RTCDataChannel | undefined
-        if (dc && dc.bufferedAmount > 64 * 1024) {
-          await new Promise<void>((resolve) => {
-            const check = () => {
-              if (!dc || dc.bufferedAmount <= 16 * 1024) {
-                resolve()
-              } else {
-                setTimeout(check, 15)
+    const peerKey = conn.peer
+    const currentQueue = sendQueuesRef.current.get(peerKey) || Promise.resolve()
+
+    const doSend = async () => {
+      if (!conn.open) return
+      const serialized = JSON.stringify(message)
+      if (serialized.length > CHUNK_SIZE) {
+        const chunkId = `chunk-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        const total = Math.ceil(serialized.length / CHUNK_SIZE)
+        for (let i = 0; i < total; i++) {
+          if (!conn.open) return
+          const dc = (conn as any).dataChannel as RTCDataChannel | undefined
+          if (dc && dc.bufferedAmount > 32 * 1024) {
+            await new Promise<void>((resolve) => {
+              const check = () => {
+                if (!dc || dc.bufferedAmount <= 8 * 1024) {
+                  resolve()
+                } else {
+                  setTimeout(check, 10)
+                }
               }
-            }
-            setTimeout(check, 15)
+              setTimeout(check, 10)
+            })
+          }
+          const slice = serialized.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+          conn.send({
+            type: 'DATA_CHUNK',
+            senderId: message.senderId,
+            payload: {
+              chunkId,
+              index: i,
+              total,
+              data: slice,
+            },
           })
+          if (i % 4 === 3) {
+            await new Promise((r) => setTimeout(r, 4))
+          }
         }
-        const slice = serialized.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
-        conn.send({
-          type: 'DATA_CHUNK',
-          senderId: message.senderId,
-          payload: {
-            chunkId,
-            index: i,
-            total,
-            data: slice,
-          },
-        })
-        if (i % 8 === 7) {
-          await new Promise((r) => setTimeout(r, 5))
-        }
+      } else {
+        conn.send(message)
       }
-    } else {
-      conn.send(message)
     }
+
+    const nextPromise = currentQueue.then(doSend, doSend)
+    sendQueuesRef.current.set(peerKey, nextPromise)
+    await nextPromise
   }, [])
 
   const handleRawData = useCallback((data: any, fromPeerId: string) => {
     if (!data) return
 
     if (data.type === 'DATA_CHUNK' && data.payload) {
+      const now = Date.now()
+      if (chunkBuffersRef.current.size > 20) {
+        for (const [id, buf] of chunkBuffersRef.current.entries()) {
+          if (now - buf.timestamp > 30000) {
+            chunkBuffersRef.current.delete(id)
+          }
+        }
+      }
+
       const { chunkId, index, total, data: chunkData } = data.payload
       let buffer = chunkBuffersRef.current.get(chunkId)
       if (!buffer) {
-        buffer = { received: new Map(), total }
+        buffer = { received: new Map(), total, timestamp: now }
         chunkBuffersRef.current.set(chunkId, buffer)
       }
       buffer.received.set(index, chunkData)
@@ -162,6 +182,7 @@ export function usePeerConnection(
       peerRef.current = null
     }
 
+    sendQueuesRef.current.clear()
     chunkBuffersRef.current.clear()
     clockSync.reset()
     setIsConnected(false)
@@ -171,28 +192,30 @@ export function usePeerConnection(
   }, [])
 
   const broadcast = useCallback(
-    (message: PeerMessage) => {
+    async (message: PeerMessage): Promise<void> => {
+      const promises: Promise<void>[] = []
       connectionsRef.current.forEach((conn) => {
-        sendThroughConnection(conn, message)
+        promises.push(sendThroughConnection(conn, message))
       })
+      await Promise.all(promises)
     },
     [sendThroughConnection]
   )
 
   const sendToPeer = useCallback(
-    (targetPeerId: string, message: PeerMessage) => {
+    async (targetPeerId: string, message: PeerMessage): Promise<void> => {
       const conn = connectionsRef.current.get(targetPeerId)
       if (conn) {
-        sendThroughConnection(conn, message)
+        await sendThroughConnection(conn, message)
       }
     },
     [sendThroughConnection]
   )
 
   const sendToHost = useCallback(
-    (message: PeerMessage) => {
+    async (message: PeerMessage): Promise<void> => {
       if (hostConnectionRef.current && hostConnectionRef.current.open) {
-        sendThroughConnection(hostConnectionRef.current, message)
+        await sendThroughConnection(hostConnectionRef.current, message)
       }
     },
     [sendThroughConnection]

@@ -1,9 +1,6 @@
 import { MediaItem, Player } from '../types/game'
 import { getMockPartyPhotos, getMockPartyVideos, getMockPartyDeck } from './mockData'
 
-/**
- * Modern Fisher-Yates shuffle
- */
 export function fisherYatesShuffle<T>(arr: T[]): T[] {
   const result = [...arr]
   for (let i = result.length - 1; i > 0; i--) {
@@ -13,25 +10,68 @@ export function fisherYatesShuffle<T>(arr: T[]): T[] {
   return result
 }
 
-/**
- * Fairly and evenly distributes rounds across ALL participating players who contributed media.
- * Avoids host dominance: if multiple players uploaded media, rounds alternate fairly among them,
- * and the sequence is thoroughly randomized using Fisher-Yates shuffle.
- */
+export function buildAggregatedPool(
+  submissions: Map<string, MediaItem[]> | Record<string, MediaItem[]>
+): MediaItem[] {
+  const pool: MediaItem[] = []
+  const entries =
+    submissions instanceof Map
+      ? Array.from(submissions.entries())
+      : Object.entries(submissions)
+
+  for (const [playerId, items] of entries) {
+    if (!Array.isArray(items)) continue
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      const id = item.id || `${playerId}_${i}`
+      const dataUrl = item.dataUrl || ''
+      pool.push({
+        id,
+        dataUrl,
+        type: item.type || 'image',
+        ownerId: item.ownerId || playerId,
+        ownerName: item.ownerName || 'Player',
+        isGuaranteed: Boolean(item.isGuaranteed),
+      })
+    }
+  }
+
+  return pool
+}
+
 export function buildBalancedRouletteDeck(
-  rawDeck: MediaItem[],
+  rawDeckOrSubmissions: MediaItem[] | Map<string, MediaItem[]>,
   players: Player[],
   mediaType: 'photos_only' | 'videos_only' | 'mixed' = 'photos_only',
   totalRoundsRequested: number = 10
 ): MediaItem[] {
-  let eligibleDeck = rawDeck.filter((m) => m.type === 'image')
+  const rawDeck: MediaItem[] =
+    rawDeckOrSubmissions instanceof Map
+      ? buildAggregatedPool(rawDeckOrSubmissions)
+      : rawDeckOrSubmissions
+
+  let eligibleDeck = rawDeck.filter((m) => {
+    if (mediaType === 'videos_only') return m.type === 'video'
+    if (mediaType === 'photos_only') return m.type === 'image'
+    return m.type === 'image' || m.type === 'video'
+  })
 
   if (eligibleDeck.length === 0) {
-    return getMockPartyPhotos().slice(0, totalRoundsRequested).map((p, idx) => ({
-      ...p,
-      ownerId: players[idx % players.length]?.id || 'host',
-      ownerName: players[idx % players.length]?.name || 'Player',
-    }))
+    const mockSource =
+      mediaType === 'videos_only'
+        ? getMockPartyVideos()
+        : mediaType === 'mixed'
+        ? getMockPartyDeck('mixed')
+        : getMockPartyPhotos()
+
+    return mockSource.slice(0, totalRoundsRequested).map((p, idx) => {
+      const assignedPlayer = players[idx % (players.length || 1)]
+      return {
+        ...p,
+        ownerId: assignedPlayer?.id || 'host',
+        ownerName: assignedPlayer?.name || 'Player',
+      }
+    })
   }
 
   const playerMediaMap = new Map<string, MediaItem[]>()
@@ -54,10 +94,8 @@ export function buildBalancedRouletteDeck(
   const selectedItems: MediaItem[] = []
   const maxRounds = Math.min(totalRoundsRequested, eligibleDeck.length)
 
-  // Cyclically pick 1 item from each player until maxRounds is reached
   let roundCounter = 0
   while (selectedItems.length < maxRounds && activeContributorIds.length > 0) {
-    // Randomize player order within each round cycle so it doesn't follow a predictable turn order
     const cycleOrder = fisherYatesShuffle([...activeContributorIds])
     for (const pId of cycleOrder) {
       if (selectedItems.length >= maxRounds) break
@@ -71,9 +109,8 @@ export function buildBalancedRouletteDeck(
       }
     }
     roundCounter++
-    if (roundCounter > 200) break // Safety exit
+    if (roundCounter > 200) break
   }
 
-  // Final Fisher-Yates shuffle on the balanced deck so rounds are totally unpredictable
   return fisherYatesShuffle(selectedItems)
 }

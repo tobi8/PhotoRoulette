@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react"
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import {
   Smartphone,
   Clipboard,
@@ -118,12 +118,24 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   const hasGuaranteed = useMemo(() => items.some((i) => i.isGuaranteed), [items])
 
+  const onMediaReadyRef = useRef(onMediaReady)
+  onMediaReadyRef.current = onMediaReady
+  const lastEmittedSignatureRef = useRef<string>('')
+
+  const emitApprovedMedia = useCallback(() => {
+    const approved = getApprovedMedia(mediaType)
+    const sig = approved.map((i) => `${i.id}_${i.isGuaranteed ? 'g' : 'n'}`).join(',')
+    if (sig && sig !== lastEmittedSignatureRef.current) {
+      lastEmittedSignatureRef.current = sig
+      onMediaReadyRef.current?.(approved)
+    }
+  }, [getApprovedMedia, mediaType])
+
   useEffect(() => {
     if (items.length > 0) {
-      const approved = getApprovedMedia(mediaType)
-      onMediaReady(approved)
+      emitApprovedMedia()
     }
-  }, [items, mediaType, getApprovedMedia, onMediaReady])
+  }, [items, emitApprovedMedia])
 
   const handleGuaranteedPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
