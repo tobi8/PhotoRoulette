@@ -173,9 +173,13 @@ let testPreloadSent = false
 let testStartSent = false
 let testStartPayload = null
 
+let testCountdownStarted = false
 const testController = new HostRoundController({
   onPreloadBroadcast: (p) => {
     testPreloadSent = true
+  },
+  onCountdownStart: (roundNum, total) => {
+    testCountdownStarted = true
   },
   onRoundStartBroadcast: (p) => {
     testStartSent = true
@@ -189,12 +193,14 @@ const testController = new HostRoundController({
 
 testController.initGame(hostDummyDeck, hostDummyPlayers, 5, 2, false)
 testController.startRound(1)
-assert.strictEqual(testController.getPhase(), 'PRECACHE', 'Should enter PRECACHE phase first')
-assert.strictEqual(testPreloadSent, true, 'Preload payload should be dispatched')
-assert.strictEqual(testStartSent, false, 'Start should wait until asset pre-cache acknowledged')
+assert.strictEqual(testPreloadSent, true, 'Preload payload should be dispatched in background')
+assert.strictEqual(testStartSent, false, 'Start should wait until countdown finish')
 
 testController.handleClientPreloadAck(1, 'g1')
-assert.strictEqual(testController.getPhase(), 'ROUND_ACTIVE', 'Should enter ROUND_ACTIVE after peers ack')
+assert.strictEqual(testCountdownStarted, true, 'Countdown should trigger once peers ack')
+
+testController.transitionToActiveRound(1)
+assert.strictEqual(testController.getPhase(), 'ROUND_ACTIVE', 'Should enter ROUND_ACTIVE')
 assert.strictEqual(testStartSent, true, 'Round start dispatched with future endTime')
 assert.ok(testStartPayload.endTime > testStartPayload.startTime, 'endTime must be in future')
 

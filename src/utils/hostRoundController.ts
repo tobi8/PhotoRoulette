@@ -1,9 +1,10 @@
 import { MediaItem, Player, RoundStartPayload, RoundPreloadPayload, LeaderboardSyncPayload } from '../types/game'
 
-export type RoundControllerPhase = 'IDLE' | 'PRECACHE' | 'ROUND_ACTIVE' | 'LEADERBOARD_BARRIER'
+export type RoundControllerPhase = 'IDLE' | 'PRECACHE' | 'COUNTDOWN' | 'ROUND_ACTIVE' | 'LEADERBOARD_BARRIER'
 
 export interface HostRoundControllerCallbacks {
   onPreloadBroadcast: (payload: RoundPreloadPayload) => void
+  onCountdownStart: (roundNumber: number, totalRounds: number) => void
   onRoundStartBroadcast: (payload: RoundStartPayload) => void
   onRoundExpire: () => void
   onLeaderboardBroadcast: (payload: LeaderboardSyncPayload) => void
@@ -23,7 +24,6 @@ export class HostRoundController {
 
   private precacheAcks: Set<string> = new Set()
   private precacheTimeoutId: any = null
-
   private activeRoundTimerId: any = null
 
   private leaderboardAcks: Set<string> = new Set()
@@ -49,21 +49,13 @@ export class HostRoundController {
     this.players = players
   }
 
-  public startRound(roundNumber: number): void {
-    this.cleanupTimers()
-
+  public preloadRound(roundNumber: number): void {
     if (roundNumber > this.totalRounds || this.currentRoundIndex >= this.deck.length) {
-      this.phase = 'IDLE'
-      this.callbacks.onGameOver()
       return
     }
 
     const media = this.deck[this.currentRoundIndex]
-    if (!media) {
-      this.phase = 'IDLE'
-      this.callbacks.onGameOver()
-      return
-    }
+    if (!media) return
 
     this.phase = 'PRECACHE'
     this.precacheAcks.clear()
@@ -81,33 +73,66 @@ export class HostRoundController {
     }
 
     this.callbacks.onPreloadBroadcast(preloadPayload)
-
-    this.precacheTimeoutId = setTimeout(() => {
-      this.transitionToActiveRound(roundNumber)
-    }, 6000)
   }
 
   public handleClientPreloadAck(roundNumber: number, playerId: string): void {
-    if (this.phase !== 'PRECACHE') return
     const expectedRound = this.currentRoundIndex + 1
     if (roundNumber !== expectedRound) return
 
     this.precacheAcks.add(playerId)
+    if (this.phase === 'PRECACHE') {
+      const nonHostConnectedPeers = this.players.filter((p) => !p.isHost && !p.id.startsWith('bot-'))
+      const allAcknowledged = nonHostConnectedPeers.every((p) => this.precacheAcks.has(p.id))
+      if (allAcknowledged) {
+        if (this.precacheTimeoutId) {
+          clearTimeout(this.precacheTimeoutId)
+          this.precacheTimeoutId = null
+          this.startCountdown(roundNumber)
+        }
+      }
+    }
+  }
+
+  public startRound(roundNumber: number): void {
+    this.cleanupTimers()
+
+    if (roundNumber > this.totalRounds || this.currentRoundIndex >= this.deck.length) {
+      this.phase = 'IDLE'
+      this.callbacks.onGameOver()
+      return
+    }
+
+    const media = this.deck[this.currentRoundIndex]
+    if (!media) {
+      this.phase = 'IDLE'
+      this.callbacks.onGameOver()
+      return
+    }
 
     const nonHostConnectedPeers = this.players.filter((p) => !p.isHost && !p.id.startsWith('bot-'))
     const allAcknowledged = nonHostConnectedPeers.every((p) => this.precacheAcks.has(p.id))
 
     if (allAcknowledged) {
-      if (this.precacheTimeoutId) {
-        clearTimeout(this.precacheTimeoutId)
-        this.precacheTimeoutId = null
-      }
-      this.transitionToActiveRound(roundNumber)
+      this.startCountdown(roundNumber)
+    } else {
+      this.phase = 'PRECACHE'
+      this.preloadRound(roundNumber)
+      this.precacheTimeoutId = setTimeout(() => {
+        this.startCountdown(roundNumber)
+      }, 2500)
     }
   }
 
-  private transitionToActiveRound(roundNumber: number): void {
-    if (this.phase !== 'PRECACHE') return
+  public startCountdown(roundNumber: number): void {
+    if (this.precacheTimeoutId) {
+      clearTimeout(this.precacheTimeoutId)
+      this.precacheTimeoutId = null
+    }
+    this.phase = 'COUNTDOWN'
+    this.callbacks.onCountdownStart(roundNumber, this.totalRounds)
+  }
+
+  public transitionToActiveRound(roundNumber: number): void {
     this.cleanupTimers()
 
     const media = this.deck[this.currentRoundIndex]
@@ -161,6 +186,26 @@ export class HostRoundController {
     }
 
     this.callbacks.onLeaderboardBroadcast(syncPayload)
+
+    const nextRoundIndex = this.currentRoundIndex + 1
+    if (nextRoundIndex < this.deck.length && nextRoundIndex < this.totalRounds) {
+      const nextMedia = this.deck[nextRoundIndex]
+      if (nextMedia) {
+        this.precacheAcks.clear()
+        const preloadPayload: RoundPreloadPayload = {
+          roundNumber: nextRoundIndex + 1,
+          totalRounds: this.totalRounds,
+          duration: this.roundDurationSec,
+          media: {
+            id: nextMedia.id,
+            type: nextMedia.type,
+            dataUrl: nextMedia.dataUrl,
+            ownerId: nextMedia.ownerId,
+          },
+        }
+        this.callbacks.onPreloadBroadcast(preloadPayload)
+      }
+    }
 
     this.leaderboardBaseTimeoutId = setTimeout(() => {
       this.isBaseDurationElapsed = true

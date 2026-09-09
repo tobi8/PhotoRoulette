@@ -329,7 +329,6 @@ export default function App() {
 
        
                 case 'ROUND_PRELOAD': {
-          setPhase('PRECACHE')
           setIsPreloading(true)
           const preloadData = payload as RoundPreloadPayload
           preloadMediaAsset(preloadData.media.dataUrl, preloadData.media.type).then((res) => {
@@ -815,17 +814,43 @@ export default function App() {
 
     hostRoundControllerRef.current = new HostRoundController({
       onPreloadBroadcast: (payload: RoundPreloadPayload) => {
-        setPhase('PRECACHE')
-        setIsPreloading(true)
         peerConnection.broadcast({
           type: 'ROUND_PRELOAD',
           senderId: peerConnection.peerId,
           payload,
         })
         preloadMediaAsset(payload.media.dataUrl, payload.media.type).then(() => {
-          setIsPreloading(false)
           hostRoundControllerRef.current?.handleClientPreloadAck(payload.roundNumber, peerConnection.peerId)
         })
+      },
+      onCountdownStart: (roundNumber: number, totalRounds: number) => {
+        setPhase('COUNTDOWN')
+        setCountdownNum(3)
+        playCountdownBeep(false)
+
+        peerConnection.broadcast({
+          type: 'ROUND_COUNTDOWN',
+          senderId: peerConnection.peerId,
+          payload: { count: 3, roundNumber, totalRounds },
+        })
+
+        let count = 3
+        const countdownTimer = setInterval(() => {
+          count--
+          if (count > 0) {
+            setCountdownNum(count)
+            playCountdownBeep(false)
+            peerConnection.broadcast({
+              type: 'ROUND_COUNTDOWN',
+              senderId: peerConnection.peerId,
+              payload: { count, roundNumber, totalRounds },
+            })
+          } else {
+            clearInterval(countdownTimer)
+            playCountdownBeep(true)
+            hostRoundControllerRef.current?.transitionToActiveRound(roundNumber)
+          }
+        }, 1000)
       },
       onRoundStartBroadcast: (payload: RoundStartPayload) => {
         setPhase('ACTIVE_ROUND')
@@ -946,7 +971,7 @@ export default function App() {
     runNextRound(1, resetPlayers)
   }
 
-  const runNextRound = (roundNum: number, currentPlayersList: Player[]) => {
+    const runNextRound = (roundNum: number, currentPlayersList: Player[]) => {
     clearAutoTimer()
     const totalRounds = Math.min(settings.totalRounds, mediaDeckRef.current.length)
 
@@ -964,37 +989,6 @@ export default function App() {
       return
     }
 
-    setPhase('COUNTDOWN')
-    setCountdownNum(3)
-    playCountdownBeep(false)
-
-    peerConnection.broadcast({
-      type: 'ROUND_COUNTDOWN',
-      senderId: peerConnection.peerId,
-      payload: { count: 3, roundNumber: roundNum, totalRounds },
-    })
-
-    let count = 3
-    const countdownTimer = setInterval(() => {
-      count--
-      if (count > 0) {
-        setCountdownNum(count)
-        playCountdownBeep(false)
-        peerConnection.broadcast({
-          type: 'ROUND_COUNTDOWN',
-          senderId: peerConnection.peerId,
-          payload: { count, roundNumber: roundNum, totalRounds },
-        })
-      } else {
-        clearInterval(countdownTimer)
-        playCountdownBeep(true)
-        launchActiveRound(roundNum)
-      }
-    }, 1000)
-  }
-
-  const launchActiveRound = (roundNum: number) => {
-    clearAutoTimer()
     const media = mediaDeckRef.current[currentRoundIndexRef.current]
     if (!media) return
 
@@ -1531,18 +1525,6 @@ export default function App() {
         {}
         {}
         {}
-        {phase === 'PRECACHE' && (
-          <div className="w-full max-w-md mx-auto text-center space-y-4 py-16 animate-in zoom-in-90 duration-200">
-            <div className="text-xs font-bold tracking-widest text-violet-400 uppercase">
-              SYNCHRONIZING ROUND...
-            </div>
-            <div className="w-12 h-12 mx-auto border-4 border-violet-500/30 border-t-violet-400 rounded-full animate-spin" />
-            <p className="text-sm text-gray-300">
-              {isPreloading ? 'Pre-caching party photos...' : 'Waiting for all devices to sync...'}
-            </p>
-          </div>
-        )}
-
         {phase === 'ACTIVE_ROUND' && activeRound.activeMedia && (
           <div className="w-full max-w-xl mx-auto space-y-2.5 sm:space-y-4 py-1 sm:py-2 animate-in fade-in duration-200">
             <div className="flex items-center justify-between text-xs text-gray-400 px-1">
