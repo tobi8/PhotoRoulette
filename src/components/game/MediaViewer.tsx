@@ -12,7 +12,6 @@ interface MediaViewerProps {
   isTimeUp?: boolean
   isHostTV?: boolean
   isMuted?: boolean
-  children?: React.ReactNode
 }
 
 export const MediaViewer: React.FC<MediaViewerProps> = ({
@@ -20,7 +19,6 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
   progressiveBlur = false,
   durationSec = 5,
   isHostTV = false,
-  children,
 }) => {
   const [blurAmount, setBlurAmount] = useState(progressiveBlur ? 24 : 0)
   const [hasError, setHasError] = useState(false)
@@ -71,7 +69,6 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
           }}
         />
       )}
-      {children}
     </div>
   )
 }

@@ -22,15 +22,8 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
 }) => {
   return (
     <div className="w-full space-y-1 sm:space-y-1.5">
-      <div className="text-[10px] sm:text-[11px] font-bold text-center text-gray-400 tracking-wider uppercase flex items-center justify-center gap-1.5">
-        {hasAnswered ? (
-          <>
-            <Lock size={12} className="text-violet-400" />
-            <span className="text-violet-300 font-extrabold">Answer Locked In!</span>
-          </>
-        ) : (
-          <span>Whose photo is this? Tap to guess!</span>
-        )}
+      <div className="text-[10px] sm:text-[11px] font-bold text-center text-gray-400 tracking-wider uppercase">
+        {hasAnswered ? 'Answer Locked In! 🔒' : 'Whose photo is this? Tap to guess!'}
       </div>
 
       <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
@@ -75,8 +68,9 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
       </div>
 
       {hasAnswered && (
-        <div className="text-center text-[10px] sm:text-[11px] text-gray-400 animate-pulse">
-          Waiting for timer to reveal the owner...
+        <div className="flex items-center justify-center gap-1.5 text-[10px] sm:text-[11px] text-violet-300 font-semibold py-0.5 animate-pulse">
+          <Lock size={12} />
+          <span>Waiting for timer to reveal the owner...</span>
         </div>
       )}
     </div>
