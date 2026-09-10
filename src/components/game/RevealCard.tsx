@@ -47,11 +47,10 @@ export const RevealCard: React.FC<RevealCardProps> = ({
   }, [autoAdvanceSeconds])
 
   const myAnswer =
-    results?.answers[currentPlayerId || ''] ||
-    (currentPlayerId
-      ? Object.entries(results?.answers || {}).find(([id]) => id === currentPlayerId)?.[1]
-      : undefined) ||
-    Object.values(results?.answers || {})[0]
+    !isHostTV && currentPlayerId
+      ? results?.answers[currentPlayerId] ||
+        Object.entries(results?.answers || {}).find(([id]) => id === currentPlayerId)?.[1]
+      : undefined
 
   const myGuessedPlayer = myAnswer?.guessedPlayerId
     ? players.find((p) => p.id === myAnswer.guessedPlayerId) ||
@@ -95,7 +94,7 @@ export const RevealCard: React.FC<RevealCardProps> = ({
         </p>
       </div>
 
-      {myAnswer && (
+      {!isHostTV && myAnswer && (
         <div
           className={`p-3.5 rounded-2xl border text-left flex items-center justify-between ${
             myAnswer.isCorrect
@@ -152,7 +151,9 @@ export const RevealCard: React.FC<RevealCardProps> = ({
             Player Guesses This Round:
           </div>
           <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-            {players.map((p) => {
+            {players
+              .filter((p) => !isHostTV || !p.isHost)
+              .map((p) => {
               const ans = results.answers[p.id]
               if (!ans) return null
               const guessedP =

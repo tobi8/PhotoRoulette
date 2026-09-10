@@ -15,7 +15,7 @@ export interface CompressionResult {
  * Decodes iPhone HEIC/HEIF files to raw pixel data using libheif (heic-decode and direct libheif-js)
  * and renders to a canvas JPEG.
  */
-async function decodeHeicFile(file: File, maxDim = 960, quality = 0.70): Promise<CompressionResult | null> {
+async function decodeHeicFile(file: File, maxDim = 1080, quality = 0.70): Promise<CompressionResult | null> {
   try {
     const arrayBuffer = await file.arrayBuffer()
     const buffer = new Uint8Array(arrayBuffer)
@@ -141,8 +141,8 @@ async function decodeHeicFile(file: File, maxDim = 960, quality = 0.70): Promise
  */
 async function tryNativeDecode(
   file: File,
-  maxDim = 540,
-  quality = 0.48,
+  maxDim = 1080,
+  quality = 0.65,
   timeoutMs = 1500
 ): Promise<CompressionResult | null> {
   // Method 1: Offscreen hardware decode via createImageBitmap (fastest on modern Safari & Chromium)
@@ -288,8 +288,8 @@ async function tryNativeDecode(
  */
 export async function compressImage(
   file: File,
-  maxDim = 540,
-  quality = 0.48
+  maxDim = 1080,
+  quality = 0.65
 ): Promise<CompressionResult> {
   const isHeic =
     /\.(heic|heif)$/i.test(file.name) ||
@@ -526,7 +526,7 @@ export async function processMediaFile(
   if (isVideo) {
     return processVideo(file)
   }
-  return compressImage(file, options?.maxDim ?? 540, options?.quality ?? 0.48)
+  return compressImage(file, options?.maxDim ?? 1080, options?.quality ?? 0.65)
 }
 
 

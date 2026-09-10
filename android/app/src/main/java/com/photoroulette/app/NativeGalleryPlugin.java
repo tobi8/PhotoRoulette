@@ -59,8 +59,8 @@ import java.util.concurrent.Future;
 )
 public class NativeGalleryPlugin extends Plugin {
 
-    private static final int TARGET_BOUNDING_BOX = 600;
-    private static final int JPEG_QUALITY = 35;
+    private static final int TARGET_BOUNDING_BOX = 1080;
+    private static final int JPEG_QUALITY = 60;
     private final ExecutorService executor = Executors.newFixedThreadPool(
         Math.min(20, Math.max(4, Runtime.getRuntime().availableProcessors() * 2))
     );
