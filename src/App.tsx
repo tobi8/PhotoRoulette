@@ -1631,19 +1631,17 @@ export default function App() {
               isTimeUp={phase !== 'ACTIVE_ROUND'}
               isHostTV={settings.tvMode && currentPlayer?.isHost}
               isMuted={isMuted}
-            >
-              {(!settings.tvMode || !currentPlayer?.isHost) && (
-                <div className="absolute bottom-0 inset-x-0 p-2.5 sm:p-3.5 bg-gradient-to-t from-black/95 via-black/75 to-transparent z-20">
-                  <PlayerGrid
-                    players={activePlayers}
-                    selectedPlayerId={activeRound.selectedPlayerId}
-                    hasAnswered={activeRound.hasAnswered}
-                    onSelectPlayer={handleAnswerSubmit}
-                    currentPlayerId={currentPlayer?.id}
-                  />
-                </div>
-              )}
-            </MediaViewer>
+            />
+
+            {(!settings.tvMode || !currentPlayer?.isHost) && (
+              <PlayerGrid
+                players={activePlayers}
+                selectedPlayerId={activeRound.selectedPlayerId}
+                hasAnswered={activeRound.hasAnswered}
+                onSelectPlayer={handleAnswerSubmit}
+                currentPlayerId={currentPlayer?.id}
+              />
+            )}
           </div>
         )}
 

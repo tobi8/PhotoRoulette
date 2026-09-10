@@ -46,7 +46,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
   return (
     <div
       className={`relative w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black/95 border border-white/15 shadow-2xl flex items-center justify-center ${
-        isHostTV ? 'h-[78vh] max-h-[880px]' : 'h-[64vh] sm:h-[72vh] max-h-[760px]'
+        isHostTV ? 'h-[75vh] sm:h-[78vh] max-h-[880px]' : 'h-[46vh] sm:h-[52vh] md:h-[58vh] max-h-[580px]'
       }`}
     >
       {hasError ? (
