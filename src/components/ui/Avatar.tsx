@@ -4,7 +4,7 @@ interface AvatarProps {
   avatar: string
   color: string
   name?: string
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
   isReady?: boolean
   showReadyStatus?: boolean
   className?: string
@@ -19,6 +19,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   className = '',
 }) => {
   const sizeClasses = {
+    xs: 'w-6 h-6 text-xs',
     sm: 'w-8 h-8 text-base',
     md: 'w-12 h-12 text-2xl',
     lg: 'w-16 h-16 text-3xl',
