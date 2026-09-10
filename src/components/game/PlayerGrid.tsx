@@ -21,11 +21,11 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
   currentPlayerId,
 }) => {
   return (
-    <div className="w-full space-y-1.5 sm:space-y-2">
-      <div className="text-[11px] sm:text-xs font-bold text-center text-gray-400 tracking-wider uppercase flex items-center justify-center gap-1.5">
+    <div className="w-full space-y-1 sm:space-y-1.5">
+      <div className="text-[10px] sm:text-[11px] font-bold text-center text-gray-400 tracking-wider uppercase flex items-center justify-center gap-1.5">
         {hasAnswered ? (
           <>
-            <Lock size={13} className="text-violet-400" />
+            <Lock size={12} className="text-violet-400" />
             <span className="text-violet-300 font-extrabold">Answer Locked In!</span>
           </>
         ) : (
@@ -33,7 +33,7 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
+      <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
         {players.map((player) => {
           const isSelected = selectedPlayerId === player.id
           const isYou = player.id === currentPlayerId
@@ -43,12 +43,12 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
               key={player.id}
               disabled={disabled || hasAnswered}
               onClick={() => onSelectPlayer(player.id)}
-              className={`relative flex items-center gap-2 sm:gap-2.5 p-2 sm:p-2.5 rounded-xl sm:rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-95 disabled:active:scale-100 ${
+              className={`relative flex items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 rounded-xl sm:rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-95 disabled:active:scale-100 ${
                 isSelected
-                  ? 'bg-gradient-to-r from-violet-600 to-indigo-600 border-violet-400 text-white shadow-lg shadow-violet-900/50 ring-2 ring-violet-400/60'
+                  ? 'bg-gradient-to-r from-violet-600 to-indigo-600 border-violet-400 text-white shadow-md shadow-violet-900/50 ring-2 ring-violet-400/60'
                   : hasAnswered
                   ? 'bg-[#171527]/50 border-white/5 opacity-50 cursor-not-allowed text-gray-400'
-                  : 'bg-[#171527] border-white/10 hover:border-white/30 hover:bg-[#201d36] text-white shadow-md'
+                  : 'bg-[#171527] border-white/10 hover:border-white/30 hover:bg-[#201d36] text-white shadow-sm'
               }`}
             >
               <Avatar avatar={player.avatar} color={player.color} size="sm" />
@@ -58,7 +58,7 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
                   {player.name}
                 </div>
                 {isYou && (
-                  <span className="text-[10px] text-gray-400 block -mt-0.5">
+                  <span className="text-[9px] sm:text-[10px] text-gray-400 block -mt-0.5">
                     (You)
                   </span>
                 )}
@@ -66,7 +66,7 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
 
               {isSelected && (
                 <div className="p-1 rounded-full bg-white/20 text-white shrink-0">
-                  <Check size={14} />
+                  <Check size={13} />
                 </div>
               )}
             </button>
@@ -75,7 +75,7 @@ export const PlayerGrid: React.FC<PlayerGridProps> = ({
       </div>
 
       {hasAnswered && (
-        <div className="text-center text-[11px] text-gray-400 animate-pulse">
+        <div className="text-center text-[10px] sm:text-[11px] text-gray-400 animate-pulse">
           Waiting for timer to reveal the owner...
         </div>
       )}

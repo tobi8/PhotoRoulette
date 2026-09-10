@@ -1319,15 +1319,15 @@ export default function App() {
   return (
     <div className="min-h-screen w-full bg-[#0d0b18] text-gray-100 flex flex-col justify-between selection:bg-violet-600 selection:text-white">
       {}
-      <header className="w-full max-w-4xl mx-auto px-4 pt-3 sm:pt-5 pb-2 flex items-center justify-between z-30 pt-[max(0.75rem,env(safe-area-inset-top))]">
+      <header className="w-full max-w-4xl mx-auto px-4 pt-2 sm:pt-4 pb-1.5 flex items-center justify-between z-30 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <div
           onClick={handleLeaveGame}
           className="flex items-center gap-2 cursor-pointer select-none"
         >
-          <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center text-xl shadow-lg shadow-violet-900/40 border border-white/20">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center text-lg sm:text-xl shadow-lg shadow-violet-900/40 border border-white/20">
             📸
           </div>
-          <span className="font-black text-lg sm:text-xl tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-pink-200 to-violet-300">
+          <span className="font-black text-base sm:text-xl tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-pink-200 to-violet-300">
             PHOTO ROULETTE
           </span>
         </div>
@@ -1344,7 +1344,7 @@ export default function App() {
       </header>
 
       {}
-      <main className="w-full max-w-3xl mx-auto px-4 py-2 flex-1 flex flex-col justify-center">
+      <main className="w-full max-w-3xl mx-auto px-3 sm:px-4 py-1 flex-1 flex flex-col justify-center">
         {}
         {}
         {}
@@ -1607,7 +1607,7 @@ export default function App() {
         {}
         {}
         {phase === 'ACTIVE_ROUND' && activeRound.activeMedia && (
-          <div className="w-full max-w-xl mx-auto space-y-2.5 sm:space-y-4 py-1 sm:py-2 animate-in fade-in duration-200">
+          <div className="w-full max-w-xl mx-auto space-y-1.5 sm:space-y-2.5 py-0.5 animate-in fade-in duration-200">
             <div className="flex items-center justify-between text-xs text-gray-400 px-1">
               <span className="font-bold text-violet-300">
                 Round {activeRound.roundNumber} of {activeRound.totalRounds}
