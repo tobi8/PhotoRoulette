@@ -36,7 +36,7 @@ interface MediaUploaderProps {
   userId?: string
 }
 
-const SHORTCUT_INSTALL_URL = "https://www.icloud.com/shortcuts/27334fc92cd748b68a566706dcbd7511"
+const SHORTCUT_INSTALL_URL = "https://www.icloud.com/shortcuts/e1303ad5d2a74f98a466a0bc3215bacd"
 const SHORTCUT_NAME = "PhotoRouletteUpload"
 
 export const MediaUploader: React.FC<MediaUploaderProps> = ({
