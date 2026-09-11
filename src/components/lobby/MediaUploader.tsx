@@ -11,6 +11,7 @@ import {
   Star,
   ExternalLink,
   RefreshCw,
+  Download,
 } from "lucide-react"
 import { Button } from "../ui/Button"
 import { Badge } from "../ui/Badge"
@@ -620,56 +621,94 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
       {items.length === 0 ? (
         <div className="space-y-3">
           {isAndroidDevice ? (
-            <>
-              {permissionDenied && (
-                <div className="p-3.5 rounded-2xl bg-amber-950/60 border border-amber-500/40 text-xs text-amber-200 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck size={18} className="text-amber-400 shrink-0" />
-                    <span>Permission required.</span>
+            hasAndroidBridge() ? (
+              <>
+                {permissionDenied && (
+                  <div className="p-3.5 rounded-2xl bg-amber-950/60 border border-amber-500/40 text-xs text-amber-200 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck size={18} className="text-amber-400 shrink-0" />
+                      <span>Permission required.</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleAndroidPick}
+                        className="px-3 py-1.5 bg-amber-500 text-black font-bold rounded-lg text-xs"
+                      >
+                        Grant Access
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openAndroidAppSettings}
+                        className="px-2.5 py-1.5 bg-white/10 text-white font-medium rounded-lg text-xs"
+                      >
+                        Settings
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={handleAndroidPick}
-                      className="px-3 py-1.5 bg-amber-500 text-black font-bold rounded-lg text-xs"
-                    >
-                      Grant Access
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openAndroidAppSettings}
-                      className="px-2.5 py-1.5 bg-white/10 text-white font-medium rounded-lg text-xs"
-                    >
-                      Settings
-                    </button>
-                  </div>
-                </div>
-              )}
+                )}
 
-              <button
-                type="button"
-                onClick={handleAndroidPick}
-                disabled={isPreparing}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
-                    <Smartphone size={24} />
-                  </div>
-                  <div>
-                    <div className="font-extrabold text-white text-base">
-                      Pick 20 Random Photos
+                <button
+                  type="button"
+                  onClick={handleAndroidPick}
+                  disabled={isPreparing}
+                  className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                      <Smartphone size={24} />
                     </div>
-                    <div className="text-xs text-emerald-200/90 font-normal mt-0.5">
-                      Instantly selects 20 photos automatically
+                    <div>
+                      <div className="font-extrabold text-white text-base">
+                        Pick 20 Random Photos
+                      </div>
+                      <div className="text-xs text-emerald-200/90 font-normal mt-0.5">
+                        Instantly selects 20 photos automatically
+                      </div>
                     </div>
                   </div>
-                </div>
-                <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
-                  Pick 20
-                </span>
-              </button>
-            </>
+                  <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
+                    Pick 20
+                  </span>
+                </button>
+              </>
+            ) : (
+              <div className="space-y-2.5">
+                <a
+                  href="./PhotoRoulette.apk"
+                  download="PhotoRoulette.apk"
+                  className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 text-white font-bold transition-all flex items-center justify-between gap-3 active:scale-98 text-left cursor-pointer shadow-lg shadow-emerald-500/20"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white shrink-0">
+                      <Download size={24} />
+                    </div>
+                    <div>
+                      <div className="font-extrabold text-white text-base">
+                        Download Android App (APK)
+                      </div>
+                      <div className="text-xs text-emerald-200/90 font-normal mt-0.5">
+                        Fastest camera roll access & 1-tap auto pick
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-xs bg-white/20 text-white px-3.5 py-1.5 rounded-full font-bold shrink-0">
+                    Download
+                  </span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => guaranteedInputRef.current?.click()}
+                  className="w-full p-3.5 rounded-2xl bg-violet-950/50 hover:bg-violet-900/60 border border-violet-500/30 text-violet-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98 cursor-pointer"
+                >
+                  <span className="text-sm font-bold text-white">Or Select Photos in Browser</span>
+                  <span className="text-xs bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold">
+                    Choose Files
+                  </span>
+                </button>
+              </div>
+            )
           ) : (
             <div className="space-y-2.5">
               {!isPendingPaste ? (
@@ -731,6 +770,20 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                 <span className="text-sm font-bold text-white">Install Shortcut (First Time Only)</span>
                 <span className="text-xs bg-violet-500/20 text-violet-300 px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
                   Install <ExternalLink size={12} />
+                </span>
+              </a>
+
+              <a
+                href="./PhotoRoulette.apk"
+                download="PhotoRoulette.apk"
+                className="w-full p-3 rounded-2xl bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/30 text-emerald-200 text-xs font-bold flex items-center justify-between gap-3 transition-all active:scale-98"
+              >
+                <div className="flex items-center gap-2">
+                  <Download size={14} className="text-emerald-400" />
+                  <span className="text-xs font-bold text-white">Download Android APK</span>
+                </div>
+                <span className="text-[11px] bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-full font-bold">
+                  APK
                 </span>
               </a>
             </div>

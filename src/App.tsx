@@ -6,7 +6,9 @@ import {
   ArrowRight,
   Crown,
   Tv,
+  Download,
 } from 'lucide-react'
+import { isNativeApp } from './services/nativeMediaService'
 import {
   ActiveRoundState,
   GamePhase,
@@ -1333,6 +1335,18 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
+          {!isNativeApp() && (
+            <a
+              href="./PhotoRoulette.apk"
+              download="PhotoRoulette.apk"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+              title="Download Android APK"
+            >
+              <Download size={13} className="text-emerald-400" />
+              <span className="hidden xs:inline sm:inline">Android APK</span>
+            </a>
+          )}
+
           {peerConnection.roomCode && (
             <Badge variant="primary" size="sm" className="font-mono">
               Room: {peerConnection.roomCode}
@@ -1387,6 +1401,27 @@ export default function App() {
                   <Users size={20} className="text-violet-400" />
                   <span>Join Game (Player)</span>
                 </Button>
+
+                {!isNativeApp() && (
+                  <a
+                    href="./PhotoRoulette.apk"
+                    download="PhotoRoulette.apk"
+                    className="w-full py-3 px-4 rounded-2xl border border-emerald-500/40 bg-gradient-to-r from-emerald-950/60 to-teal-950/60 hover:from-emerald-900/70 hover:to-teal-900/70 text-emerald-300 font-bold text-sm flex items-center justify-between gap-3 transition-all shadow-lg active:scale-98 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                        <Download size={16} />
+                      </div>
+                      <div className="text-left">
+                        <div className="text-white text-xs font-bold">Download Android APK</div>
+                        <div className="text-[10px] text-emerald-300/80 font-normal">Fastest camera roll access & 1-tap auto pick</div>
+                      </div>
+                    </div>
+                    <span className="text-[11px] bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-full font-bold">
+                      Download
+                    </span>
+                  </a>
+                )}
               </div>
             )}
 
@@ -1698,8 +1733,18 @@ export default function App() {
       </main>
 
       {}
-      <footer className="w-full max-w-4xl mx-auto px-4 py-3 text-center text-xs text-gray-500">
+      <footer className="w-full max-w-4xl mx-auto px-4 py-3 text-center text-xs text-gray-500 flex flex-col sm:flex-row items-center justify-between gap-2">
         <span>Photo Roulette • WebRTC P2P Party Game • Serverless on GitHub Pages</span>
+        {!isNativeApp() && (
+          <a
+            href="./PhotoRoulette.apk"
+            download="PhotoRoulette.apk"
+            className="text-emerald-400 hover:text-emerald-300 font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+          >
+            <Download size={13} />
+            <span>Download Android APK</span>
+          </a>
+        )}
       </footer>
     </div>
   )
